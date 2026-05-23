@@ -75,27 +75,16 @@ async function pdfToPages(buf, max=60) {
   });
 }
 
-// fal.ai — flux/schnell for faster generation
-async function falImg(prompt, key) {
-  if (!key) throw new Error("No image API key configured");
-  let r;
-  try {
-    r = await fetch("https://fal.run/fal-ai/flux/schnell", {
-      method:"POST",
-      mode:"cors",
-      headers:{"Content-Type":"application/json","Authorization":`Key ${key}`},
-      body:JSON.stringify({ prompt, image_size:"landscape_16_9", num_images:1 }),
-    });
-  } catch {
-    throw new Error("Image generation unavailable — network blocked in this preview environment");
-  }
-  if (!r.ok) {
-    const t = await r.text().catch(()=>"");
-    throw new Error(`Generation failed (${r.status})${t?`: ${t.slice(0,120)}`:""}`)
-  }
-  const d = await r.json();
-  const url = d.images?.[0]?.url;
-  if (!url) throw new Error("No image returned");
+// Image generation via Pollinations.ai — no API key, works in any sandbox
+async function generateImage(prompt) {
+  const seed = Math.floor(Math.random() * 9999999);
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1280&height=720&nologo=true&seed=${seed}&model=flux`;
+  await new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = res;
+    img.onerror = () => rej(new Error("Image generation failed — try again"));
+    img.src = url;
+  });
   return url;
 }
 
@@ -270,7 +259,7 @@ function Bubble({m,onLoad}) {
         {m.imageUrl&&<div style={{borderRadius:12,overflow:"hidden",boxShadow:"0 4px 20px rgba(0,0,0,.15)",maxWidth:"min(360px,82vw)"}}>
           <img src={m.imageUrl} alt="" style={{width:"100%",display:"block"}} onLoad={onLoad}/>
           <div style={{padding:"7px 12px",background:"#fff",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <span style={{fontFamily:HN,fontSize:10,color:"#aeaeb2"}}>FLUX · fal.ai</span>
+            <span style={{fontFamily:HN,fontSize:10,color:"#aeaeb2"}}>FLUX · Pollinations</span>
             <a href={m.imageUrl} download="marque.jpg" target="_blank" rel="noreferrer" style={{fontFamily:HN,fontSize:11,color:"#007aff",textDecoration:"none"}}>Download</a>
           </div>
         </div>}
@@ -373,7 +362,6 @@ export default function Marque() {
   const [toast,setToast]=useState({msg:"",on:false});
   const [dragging,setDragging]=useState(false);
   const [hasEmail,setHasEmail]=useState(false);
-  const [falKey]=useState(()=>sessionStorage.getItem("mq_fal")||"");
   const [isDesktop,setIsDesktop]=useState(()=>typeof window!=="undefined"?window.innerWidth>=1024:false);
 
   const bottomRef=useRef(); const inputRef=useRef(); const fileRef=useRef();
@@ -487,11 +475,11 @@ export default function Marque() {
     catch(e){setMessages(p=>[...p,{role:"assistant",content:`Something went wrong: ${e.message}`}]);setChatBusy(false);scrollB();return;}
 
     const imgTag=reply.match(/\[IMG:([^\]]+)\]/);
-    if(imgTag&&isPaid&&falKey&&imgCount<cur.imgs){
+    if(imgTag&&isPaid&&imgCount<cur.imgs){
       const gm={role:"assistant",content:reply,genImg:true};
       setMessages(p=>[...p,gm]);setChatBusy(false);scrollB();
       try{
-        const url=await falImg(`${imgTag[1].trim()}. Brand: ${brandName}. Editorial, architectural, high contrast.`,falKey);
+        const url=await generateImage(`${imgTag[1].trim()}. Brand: ${brandName}. Editorial, architectural, high contrast.`);
         setImgCount(x=>x+1);setMessages(p=>p.map(m=>m===gm?{...m,imageUrl:url,genImg:false}:m));toast_("Image generated ✓");scrollB();
       }catch(e){setMessages(p=>p.map(m=>m===gm?{...m,genImg:false,content:m.content.replace(/\[IMG:[^\]]*\]/g,"").trim()+`\n(Image failed: ${e.message})`}:m));}
     } else if(imgTag&&!isPaid){
@@ -531,7 +519,7 @@ Return ONLY a JSON object, no markdown, no explanation:
     setImgLoading(i);setConcepts(p=>p.map((c,j)=>j===i?{...c,generating:true}:c));
     try{
       const c=concepts[i];
-      const url=await falImg(`${c.mood} brand visual for "${brandName}". ${c.format}. BG:${c.background}. Headline:"${c.headline}". ${(c.visualElements||[]).join(", ")}. ${c.artDirectionNotes}. Editorial, architectural, high contrast.`,falKey);
+      const url=await generateImage(`${c.mood} brand visual for "${brandName}". ${c.format}. BG:${c.background}. Headline:"${c.headline}". ${(c.visualElements||[]).join(", ")}. ${c.artDirectionNotes}. Editorial, architectural, high contrast.`);
       setImgCount(x=>x+1);setConcepts(p=>p.map((c,j)=>j===i?{...c,imageUrl:url,generating:false}:c));toast_("Image generated ✓");
     }catch(e){setConcepts(p=>p.map((c,j)=>j===i?{...c,generating:false}:c));toast_(`Image error: ${e.message}`);}
     setImgLoading(null);
