@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 
 const HN = "-apple-system,'Helvetica Neue',Helvetica,Arial,sans-serif";
 
@@ -116,7 +116,7 @@ async function pdfToPages(buf,max=60) {
 
 async function generateImage(prompt) {
   const seed=Math.floor(Math.random()*9999999);
-  const url=`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1280&height=720&nologo=true&seed=${seed}&model=flux`;
+  const url=`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=896&height=504&nologo=true&seed=${seed}&model=turbo`;
   await new Promise((res,rej)=>{
     const img=new Image();
     img.onload=res;
@@ -128,7 +128,7 @@ async function generateImage(prompt) {
 
 // Plans
 const PLANS={
-  seed:  {name:"Seed",  price:0,  team:1,  msgs:50,  imgs:0,   concepts:3,   sharable:false},
+  seed:  {name:"Seed",  price:0,  team:1,  msgs:50,  imgs:3,   concepts:3,   sharable:false},
   series:{name:"Series",price:29, team:5,  msgs:1e9, imgs:30,  concepts:1e9, sharable:true},
   scale: {name:"Scale", price:79, team:20, msgs:1e9, imgs:100, concepts:1e9, sharable:true},
 };
@@ -230,25 +230,71 @@ function ShareSheet({brandName,pages,onClose,onPreview}) {
   );
 }
 
-function SharedGuideView({brandName,pages,onBack}) {
+function SharedGuideView({brandName,pages,dna,logoUrl,fontName,onBack}) {
   const slug=brandName.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+  const hasDna=DNA_META.some(([k])=>dna?.[k]?.trim());
   return(
-    <div style={{position:"fixed",inset:0,zIndex:3000,background:"#fff",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
+    <div style={{position:"fixed",inset:0,zIndex:3000,background:"#f5f5f7",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
       <div style={{maxWidth:680,margin:"0 auto"}}>
-        <div style={{position:"sticky",top:0,background:"rgba(255,255,255,.96)",backdropFilter:"blur(20px)",borderBottom:".5px solid rgba(0,0,0,.1)",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:1}}>
+        {/* Sticky header */}
+        <div style={{position:"sticky",top:0,background:"rgba(245,245,247,.97)",backdropFilter:"blur(20px)",borderBottom:".5px solid rgba(0,0,0,.1)",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:1}}>
           <div>
             <p style={{fontFamily:HN,fontSize:10,color:"#aeaeb2",letterSpacing:".04em",textTransform:"uppercase",marginBottom:2}}>marque.ai/{slug}</p>
             <p style={{fontFamily:HN,fontSize:15,fontWeight:600,color:"#1d1d1f"}}>{brandName} Brand Guide</p>
           </div>
-          <button onClick={onBack} style={{background:"#f5f5f7",border:"none",borderRadius:8,fontFamily:HN,fontSize:12,color:"#6e6e73",padding:"7px 13px",cursor:"pointer"}}>← Back</button>
+          <button onClick={onBack} style={{background:"#fff",border:".5px solid rgba(0,0,0,.12)",borderRadius:8,fontFamily:HN,fontSize:12,color:"#6e6e73",padding:"7px 13px",cursor:"pointer"}}>← Back</button>
         </div>
-        <div style={{padding:"20px 20px 60px"}}>
-          {pages.map((p,i)=>(
-            <div key={i} style={{marginBottom:10,borderRadius:12,overflow:"hidden",boxShadow:"0 2px 16px rgba(0,0,0,.09)"}}>
-              <img src={p.url} alt={`Page ${p.num}`} style={{width:"100%",display:"block"}}/>
+
+        <div style={{padding:"24px 20px 60px"}}>
+          {/* Brand identity header */}
+          <div style={{background:"#1d1d1f",borderRadius:16,padding:"24px",marginBottom:16,display:"flex",alignItems:"center",gap:16}}>
+            {logoUrl&&<div style={{width:56,height:56,borderRadius:12,background:"rgba(255,255,255,.1)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,overflow:"hidden"}}><img src={logoUrl} alt="" style={{width:"100%",height:"100%",objectFit:"contain",padding:6}}/></div>}
+            <div>
+              <h1 style={{fontFamily:HN,fontSize:22,fontWeight:700,color:"#fff",letterSpacing:"-.03em",marginBottom:4}}>{brandName}</h1>
+              {fontName&&<p style={{fontFamily:HN,fontSize:12,color:"rgba(255,255,255,.4)"}}>Brand font: {fontName}</p>}
+              {dna?.summary&&<p style={{fontFamily:HN,fontSize:13,color:"rgba(255,255,255,.6)",lineHeight:1.6,marginTop:6,maxWidth:420}}>{dna.summary}</p>}
             </div>
-          ))}
-          <div style={{textAlign:"center",paddingTop:32}}><Logo h={13} color="#d1d1d6"/></div>
+          </div>
+
+          {/* DNA sections */}
+          {hasDna&&(
+            <div style={{marginBottom:16}}>
+              {[
+                {heading:"Strategy",keys:["audience","category","positioning","emotionalTerritory","competitivePosture"]},
+                {heading:"Voice & Language",keys:["voicePrinciples","toneSliders","approvedVocabulary","bannedPhrases"]},
+                {heading:"Visual Identity",keys:["visualPrinciples","typography","colorBehavior","compositionBehavior","imageDirection","motionPersonality"]},
+                {heading:"Brand Behavior",keys:["brandBehaviors","examples"]},
+              ].map(({heading,keys})=>{
+                const fields=DNA_META.filter(([k])=>keys.includes(k)&&dna?.[k]?.trim());
+                if(!fields.length)return null;
+                return(
+                  <div key={heading} style={{background:"#fff",borderRadius:14,padding:"18px",marginBottom:10,boxShadow:"0 1px 8px rgba(0,0,0,.05),0 0 0 .5px rgba(0,0,0,.05)"}}>
+                    <p style={{fontFamily:HN,fontSize:10,fontWeight:600,color:"#aeaeb2",textTransform:"uppercase",letterSpacing:".08em",marginBottom:14}}>{heading}</p>
+                    {fields.map(([k,label])=>(
+                      <div key={k} style={{marginBottom:12,paddingBottom:12,borderBottom:".5px solid #f5f5f7"}}>
+                        <p style={{fontFamily:HN,fontSize:10,fontWeight:600,color:"#6e6e73",textTransform:"uppercase",letterSpacing:".06em",marginBottom:3}}>{label}</p>
+                        <p style={{fontFamily:HN,fontSize:13,color:"#1d1d1f",lineHeight:1.7}}>{dna[k]}</p>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* PDF pages */}
+          {pages.length>0&&(
+            <div style={{marginBottom:16}}>
+              <p style={{fontFamily:HN,fontSize:10,fontWeight:600,color:"#aeaeb2",textTransform:"uppercase",letterSpacing:".08em",marginBottom:10}}>Source Document</p>
+              {pages.map((p,i)=>(
+                <div key={i} style={{marginBottom:8,borderRadius:12,overflow:"hidden",boxShadow:"0 2px 16px rgba(0,0,0,.09)"}}>
+                  <img src={p.url} alt={`Page ${p.num}`} style={{width:"100%",display:"block"}}/>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{textAlign:"center",paddingTop:16}}><Logo h={13} color="#d1d1d6"/></div>
         </div>
       </div>
     </div>
@@ -443,12 +489,9 @@ function ConceptCard({c,idx,isPaid,imgLoading,onGen,onUpgrade}) {
           <p style={{fontFamily:HN,fontSize:"clamp(14px,4vw,24px)",fontWeight:700,color:c.textColor||"#fff",textAlign:"center",lineHeight:1.1,letterSpacing:"-.02em",marginBottom:6,maxWidth:300}}>{c.headline}</p>
           {c.subtext&&<p style={{fontFamily:HN,fontSize:10,color:c.textColor||"#fff",opacity:.5,letterSpacing:".1em",textTransform:"uppercase",textAlign:"center"}}>{c.subtext}</p>}
           <div style={{position:"absolute",bottom:10,right:10}}>
-            {!isPaid
-              ?<button onClick={onUpgrade} style={{background:"rgba(0,0,0,.45)",backdropFilter:"blur(8px)",border:"none",borderRadius:8,fontFamily:HN,fontSize:10,color:"rgba(255,255,255,.7)",padding:"5px 9px",cursor:"pointer"}}>Series+ for image</button>
-              :<button onClick={()=>onGen(idx)} disabled={imgLoading===idx} style={{background:"rgba(255,255,255,.15)",backdropFilter:"blur(8px)",border:"1px solid rgba(255,255,255,.3)",borderRadius:8,fontFamily:HN,fontSize:11,fontWeight:500,color:"#fff",padding:"6px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:5,opacity:imgLoading===idx?.4:1}}>
-                {imgLoading===idx?<><div style={{width:9,height:9,border:"1.5px solid rgba(255,255,255,.3)",borderTopColor:"#fff",borderRadius:"50%",animation:"spin .7s linear infinite"}}/>Generating...</>:"Generate image"}
-              </button>
-            }
+            <button onClick={()=>onGen(idx)} disabled={imgLoading===idx} style={{background:"rgba(255,255,255,.15)",backdropFilter:"blur(8px)",border:"1px solid rgba(255,255,255,.3)",borderRadius:8,fontFamily:HN,fontSize:11,fontWeight:500,color:"#fff",padding:"6px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:5,opacity:imgLoading===idx?.4:1}}>
+              {imgLoading===idx?<><div style={{width:9,height:9,border:"1.5px solid rgba(255,255,255,.3)",borderTopColor:"#fff",borderRadius:"50%",animation:"spin .7s linear infinite"}}/>Generating...</>:"Generate image"}
+            </button>
           </div>
         </div>
       )}
@@ -515,6 +558,7 @@ export default function Marque() {
   const [showExamples,setShowExamples]=useState(false);
   const [exInput,setExInput]=useState("");
   const [exType,setExType]=useState("good");
+  const [dnaError,setDnaError]=useState("");
 
   const bottomRef=useRef();const inputRef=useRef();const fileRef=useRef();const logoRef=useRef();
   const cur=PLANS[plan];
@@ -554,11 +598,11 @@ export default function Marque() {
   const pop=()=>{setPulse(true);setTimeout(()=>setPulse(false),1400);};
   const scrollB=()=>setTimeout(()=>bottomRef.current?.scrollIntoView({behavior:"smooth"}),80);
 
-  const callAPI=async(userContent)=>{
+  const callAPI=async(userContent,maxTokens=2000)=>{
     const resp=await fetch("https://api.anthropic.com/v1/messages",{
       method:"POST",
       headers:{"Content-Type":"application/json","anthropic-version":"2023-06-01"},
-      body:JSON.stringify({model:"claude-haiku-4-5",max_tokens:2000,messages:[{role:"user",content:userContent}]}),
+      body:JSON.stringify({model:"claude-haiku-4-5",max_tokens:maxTokens,messages:[{role:"user",content:userContent}]}),
     });
     if(!resp.ok){const t=await resp.text();throw new Error(`API ${resp.status}: ${t.slice(0,200)}`);}
     const data=await resp.json();
@@ -586,27 +630,73 @@ export default function Marque() {
 
   const extractDNA=async(text,name)=>{
     setExtracting(true);
-    const keys=Object.keys(EMPTY_DNA);
-    const prompt=`You are a brand strategist. Extract Brand DNA from these brand guidelines.
+    setDnaError("");
+    // Split into two calls so neither response is truncated at 2000 tokens.
+    // Pass A: strategy + voice fields
+    // Pass B: visual + behavior fields
+    const src=text.substring(0,16000);
+    const makePrompt=(fields)=>`You are a brand strategist. Extract brand information from these guidelines.
 
-Brand name: ${name}
+Brand: ${name}
 Guidelines:
-${text.substring(0,18000)}
+${src}
 
-Return ONLY a valid JSON object with exactly these keys:
-${JSON.stringify(keys)}
+Return ONLY a JSON object with EXACTLY these keys (no others, no markdown):
+${JSON.stringify(fields)}
 
-For each key, extract specific content from the guidelines. Use "" for fields not mentioned. No markdown, no extra text — just the JSON object.`;
-    try{
-      const raw=await callAPI(prompt);
-      const clean=raw.replace(/^```(?:json)?\s*/i,"").replace(/```\s*$/i,"").trim();
+Rules:
+- Values must be plain strings, no nested objects or arrays
+- Keep each value under 200 characters
+- Use "" for any field not found in the guidelines
+- Do not wrap in code fences`;
+
+    const parseJSON=(raw,fields)=>{
+      const clean=raw.replace(/^```(?:json)?\s*/i,"").replace(/```[\s\S]*$/i,"").trim();
       const s=clean.indexOf("{"),e=clean.lastIndexOf("}");
-      if(s===-1||e===-1)throw new Error("No JSON");
-      const extracted=JSON.parse(clean.slice(s,e+1));
-      setBrandDna(prev=>({...EMPTY_DNA,...prev,...extracted}));
-      toast_("DNA extracted — review and refine");
-    }catch{
-      toast_("DNA partial — fill in missing fields manually");
+      if(s===-1||e===-1)throw new Error("No JSON object in response");
+      const parsed=JSON.parse(clean.slice(s,e+1));
+      const out={};
+      for(const k of fields){
+        if(typeof parsed[k]==="string")out[k]=parsed[k];
+      }
+      return out;
+    };
+
+    const passA=["summary","audience","category","positioning","emotionalTerritory","competitivePosture","voicePrinciples","toneSliders","approvedVocabulary","bannedPhrases"];
+    const passB=["visualPrinciples","typography","colorBehavior","compositionBehavior","imageDirection","motionPersonality","brandBehaviors","examples"];
+
+    let merged={...EMPTY_DNA};
+    let errMsg="";
+
+    try{
+      const rawA=await callAPI(makePrompt(passA),2000);
+      const outA=parseJSON(rawA,passA);
+      merged={...merged,...outA};
+    }catch(e){
+      errMsg=`Strategy/Voice pass: ${e.message}`;
+    }
+
+    try{
+      const rawB=await callAPI(makePrompt(passB),2000);
+      const outB=parseJSON(rawB,passB);
+      merged={...merged,...outB};
+    }catch(e){
+      errMsg=errMsg?`${errMsg} | Visual/Behavior pass: ${e.message}`:`Visual/Behavior pass: ${e.message}`;
+    }
+
+    const populated=Object.values(merged).filter(v=>v?.trim()).length;
+    if(populated>0){
+      setBrandDna(merged);
+      if(errMsg){
+        setDnaError(`Partial extraction (${populated}/18 fields). ${errMsg}`);
+        toast_(`${populated} fields extracted — fill in the rest`);
+      }else{
+        setDnaError("");
+        toast_(`DNA extracted — ${populated} fields populated`);
+      }
+    }else{
+      setDnaError(errMsg||"Extraction returned no data. Check that your PDF contains readable text.");
+      toast_("Extraction failed — see error below");
     }
     setExtracting(false);
   };
@@ -632,7 +722,7 @@ ${actionSys}
 Always ground your response in specific DNA fields. Be precise and actionable.`;
   };
 
-  const processFile=useCallback(async file=>{
+  const processFile=async file=>{
     setStatus("reading");
     const name=file.name.replace(/\.[^.]+$/,"").replace(/[-_]/g," ");
     let text="";
@@ -651,13 +741,13 @@ Always ground your response in specific DNA fields. Be precise and actionable.`;
     setView("brand");setMenuOpen(false);setMessages([]);
     if(!hasEmail)setTimeout(()=>setShowEmail(true),900);
     await extractDNA(text,name);
-  },[hasEmail]);
+  };
 
-  const processLogo=useCallback(file=>{
+  const processLogo=file=>{
     const reader=new FileReader();
     reader.onload=e=>{setLogoUrl(e.target.result);toast_("Logo uploaded ✓");};
     reader.readAsDataURL(file);
-  },[]);
+  };
 
   const loadDemo=()=>{
     const demo=`BRAND: Meridian
@@ -735,8 +825,7 @@ Return ONLY a JSON object (no markdown):
   };
 
   const genConceptImg=async i=>{
-    if(!isPaid){setPaywall({reason:"AI image generation on Series and Scale plans."});return;}
-    if(imgCount>=cur.imgs){setPaywall({reason:"Image limit reached this month."});return;}
+    if(imgCount>=cur.imgs){setPaywall({reason:plan==="seed"?"3 free images used — upgrade for more.":"Image limit reached this month."});return;}
     setImgLoading(i);setConcepts(p=>p.map((c,j)=>j===i?{...c,generating:true}:c));
     try{
       const c=concepts[i];
@@ -764,7 +853,7 @@ Return ONLY a JSON object (no markdown):
   const FMTS=["Twitter/X banner","Product Hunt","LinkedIn post","Email header","App screenshot"];
   const IB={border:".5px solid rgba(0,0,0,.12)",borderRadius:10,fontFamily:HN,fontSize:16,color:"#1d1d1f",padding:"10px 12px",outline:"none",background:"#fafafa",width:"100%"};
 
-  if(sharePreview)return <SharedGuideView brandName={brandName} pages={pdfPages} onBack={()=>setSharePreview(false)}/>;
+  if(sharePreview)return <SharedGuideView brandName={brandName} pages={pdfPages} dna={brandDna} logoUrl={logoUrl} fontName={fontName} onBack={()=>setSharePreview(false)}/>;
 
   return(
     <>
@@ -885,6 +974,15 @@ Return ONLY a JSON object (no markdown):
                             <button onClick={()=>type==="good"?setGoodEx(p=>p.filter((_,j)=>j!==i)):setBadEx(p=>p.filter((_,j)=>j!==i))} style={{background:"none",border:"none",fontFamily:HN,fontSize:12,color:"#aeaeb2",padding:"0 2px",cursor:"pointer",flexShrink:0}}>✕</button>
                           </div>
                         ))}
+                      </div>
+                    )}
+
+                    {/* DNA extraction error */}
+                    {dnaError&&(
+                      <div style={{background:"#fff5f5",border:".5px solid rgba(255,59,48,.2)",borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"flex-start",gap:8}}>
+                        <span style={{fontFamily:HN,fontSize:11,color:"#ff3b30",flexShrink:0,marginTop:1}}>!</span>
+                        <p style={{fontFamily:HN,fontSize:12,color:"#ff3b30",lineHeight:1.5,margin:0}}>{dnaError}</p>
+                        <button onClick={()=>setDnaError("")} style={{background:"none",border:"none",fontFamily:HN,fontSize:12,color:"#ff3b30",opacity:.5,cursor:"pointer",flexShrink:0,padding:0}}>✕</button>
                       </div>
                     )}
 
