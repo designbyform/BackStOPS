@@ -114,16 +114,12 @@ async function pdfToPages(buf,max=60) {
   });
 }
 
-async function generateImage(prompt) {
+// Returns the URL immediately — let <img> tags handle loading/error naturally.
+// The preload-Promise pattern fails in the artifact sandbox because the Image
+// object's onload never fires reliably across iframe security contexts.
+function makeImageUrl(prompt) {
   const seed=Math.floor(Math.random()*9999999);
-  const url=`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=896&height=504&nologo=true&seed=${seed}&model=turbo`;
-  await new Promise((res,rej)=>{
-    const img=new Image();
-    img.onload=res;
-    img.onerror=()=>rej(new Error("Image generation failed — try again"));
-    img.src=url;
-  });
-  return url;
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=896&height=504&nologo=true&seed=${seed}`;
 }
 
 // Plans
@@ -410,12 +406,6 @@ function Bubble({m,onLoad}) {
             {text.split("\n").filter(Boolean).map((l,j,a)=><p key={j} style={{marginBottom:j<a.length-1?5:0}}>{l}</p>)}
           </div>
         )}
-        {m.genImg&&(
-          <div style={{borderRadius:12,background:"#f0f0f5",width:"min(280px,75vw)",height:140,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10}}>
-            <div style={{width:18,height:18,border:"2.5px solid #e5e5ea",borderTopColor:"#1d1d1f",borderRadius:"50%",animation:"spin .8s linear infinite"}}/>
-            <span style={{fontFamily:HN,fontSize:12,color:"#aeaeb2"}}>Generating image...</span>
-          </div>
-        )}
         {m.imageUrl&&(
           <div style={{borderRadius:12,overflow:"hidden",boxShadow:"0 4px 20px rgba(0,0,0,.15)",maxWidth:"min(360px,82vw)"}}>
             <img src={m.imageUrl} alt="" style={{width:"100%",display:"block"}} onLoad={onLoad}/>
@@ -468,20 +458,36 @@ function PDFPreview({pages,rendering}) {
   );
 }
 
-function ConceptCard({c,idx,isPaid,imgLoading,onGen,onUpgrade}) {
+function ConceptCard({c,idx,onGen,onUpgrade}) {
   const [cp,setCp]=useState(false);
+  const [imgLoaded,setImgLoaded]=useState(false);
+  const [imgErr,setImgErr]=useState(false);
+  // Reset load state whenever a new imageUrl arrives
+  useEffect(()=>{if(c.imageUrl){setImgLoaded(false);setImgErr(false);}},[c.imageUrl]);
   return(
     <div style={{borderRadius:14,overflow:"hidden",background:"#fff",boxShadow:"0 2px 14px rgba(0,0,0,.08),0 0 0 .5px rgba(0,0,0,.05)",marginBottom:14,animation:`sUp .35s cubic-bezier(.34,1.56,.64,1) ${idx*.05}s both`}}>
       {c.imageUrl?(
-        <div style={{position:"relative"}}>
-          <img src={c.imageUrl} alt="" style={{width:"100%",display:"block",maxHeight:220,objectFit:"cover"}}/>
-          <a href={c.imageUrl} download="marque.jpg" target="_blank" rel="noreferrer" style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,.5)",backdropFilter:"blur(8px)",borderRadius:8,fontFamily:HN,fontSize:11,color:"#fff",padding:"5px 10px",textDecoration:"none"}}>Download</a>
-          <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,.7))",padding:"20px 16px 12px"}}><p style={{fontFamily:HN,fontSize:"clamp(14px,3vw,20px)",fontWeight:700,color:"#fff",lineHeight:1.1,letterSpacing:"-.02em"}}>{c.headline}</p></div>
-        </div>
-      ):c.generating?(
-        <div style={{background:c.background||"#1d1d1f",height:160,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10}}>
-          <div style={{width:18,height:18,border:"2.5px solid rgba(255,255,255,.2)",borderTopColor:"rgba(255,255,255,.8)",borderRadius:"50%",animation:"spin .8s linear infinite"}}/>
-          <span style={{fontFamily:HN,fontSize:12,color:"rgba(255,255,255,.6)"}}>Generating...</span>
+        <div style={{position:"relative",minHeight:100,background:"#1d1d1f"}}>
+          {!imgLoaded&&!imgErr&&(
+            <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
+              <div style={{width:16,height:16,border:"2px solid rgba(255,255,255,.2)",borderTopColor:"rgba(255,255,255,.8)",borderRadius:"50%",animation:"spin .8s linear infinite"}}/>
+              <span style={{fontFamily:HN,fontSize:11,color:"rgba(255,255,255,.5)"}}>Loading image...</span>
+            </div>
+          )}
+          {imgErr&&(
+            <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,padding:20}}>
+              <span style={{fontFamily:HN,fontSize:12,color:"rgba(255,255,255,.5)",textAlign:"center"}}>Image failed to load</span>
+              <button onClick={()=>{setImgErr(false);setImgLoaded(false);onGen(idx);}} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.2)",borderRadius:8,fontFamily:HN,fontSize:11,color:"#fff",padding:"5px 12px",cursor:"pointer"}}>Retry</button>
+            </div>
+          )}
+          <img src={c.imageUrl} alt="" style={{width:"100%",display:"block",maxHeight:220,objectFit:"cover",opacity:imgLoaded?1:0,transition:"opacity .3s"}}
+            onLoad={()=>setImgLoaded(true)}
+            onError={()=>setImgErr(true)}
+          />
+          {imgLoaded&&(
+            <><a href={c.imageUrl} download="marque.jpg" target="_blank" rel="noreferrer" style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,.5)",backdropFilter:"blur(8px)",borderRadius:8,fontFamily:HN,fontSize:11,color:"#fff",padding:"5px 10px",textDecoration:"none"}}>Download</a>
+            <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,.7))",padding:"20px 16px 12px"}}><p style={{fontFamily:HN,fontSize:"clamp(14px,3vw,20px)",fontWeight:700,color:"#fff",lineHeight:1.1,letterSpacing:"-.02em"}}>{c.headline}</p></div></>
+          )}
         </div>
       ):(
         <div style={{background:c.background||"#1d1d1f",minHeight:160,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"28px 20px",position:"relative"}}>
@@ -489,8 +495,8 @@ function ConceptCard({c,idx,isPaid,imgLoading,onGen,onUpgrade}) {
           <p style={{fontFamily:HN,fontSize:"clamp(14px,4vw,24px)",fontWeight:700,color:c.textColor||"#fff",textAlign:"center",lineHeight:1.1,letterSpacing:"-.02em",marginBottom:6,maxWidth:300}}>{c.headline}</p>
           {c.subtext&&<p style={{fontFamily:HN,fontSize:10,color:c.textColor||"#fff",opacity:.5,letterSpacing:".1em",textTransform:"uppercase",textAlign:"center"}}>{c.subtext}</p>}
           <div style={{position:"absolute",bottom:10,right:10}}>
-            <button onClick={()=>onGen(idx)} disabled={imgLoading===idx} style={{background:"rgba(255,255,255,.15)",backdropFilter:"blur(8px)",border:"1px solid rgba(255,255,255,.3)",borderRadius:8,fontFamily:HN,fontSize:11,fontWeight:500,color:"#fff",padding:"6px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:5,opacity:imgLoading===idx?.4:1}}>
-              {imgLoading===idx?<><div style={{width:9,height:9,border:"1.5px solid rgba(255,255,255,.3)",borderTopColor:"#fff",borderRadius:"50%",animation:"spin .7s linear infinite"}}/>Generating...</>:"Generate image"}
+            <button onClick={()=>onGen(idx)} style={{background:"rgba(255,255,255,.15)",backdropFilter:"blur(8px)",border:"1px solid rgba(255,255,255,.3)",borderRadius:8,fontFamily:HN,fontSize:11,fontWeight:500,color:"#fff",padding:"6px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
+              Generate image
             </button>
           </div>
         </div>
@@ -537,7 +543,6 @@ export default function Marque() {
   const [concepts,setConcepts]=useState([]);
   const [cPrompt,setCPrompt]=useState("");
   const [cBusy,setCBusy]=useState(false);
-  const [imgLoading,setImgLoading]=useState(null);
   const [team,setTeam]=useState([{id:1,name:"Alex Chen",role:"Co-founder",access:"Admin"}]);
   const [newM,setNewM]=useState({name:"",role:"",access:"Editor"});
   const [teamNote,setTeamNote]=useState("");
@@ -581,7 +586,7 @@ export default function Marque() {
       if(s.logoUrl)setLogoUrl(s.logoUrl);
       if(s.goodEx)setGoodEx(s.goodEx);
       if(s.badEx)setBadEx(s.badEx);
-      if(s.messages?.length)setMessages(s.messages.map(m=>({...m,genImg:false})));
+      if(s.messages?.length)setMessages(s.messages);
       if(s.teamNote)setTeamNote(s.teamNote);
       if(s.hasEmail)setHasEmail(true);
       toast_(`${s.brandName} restored`);
@@ -729,9 +734,12 @@ Always ground your response in specific DNA fields. Be precise and actionable.`;
     try{
       if(file.type==="application/pdf"||file.name.endsWith(".pdf")){
         const buf=await file.arrayBuffer();
+        // PDF.js transfers the ArrayBuffer to its worker, detaching the original.
+        // Copy it first so both pdfToText and pdfToPages each get their own buffer.
+        const buf2=buf.slice(0);
         text=await pdfToText(buf);
         setPdfRendering(true);setPdfPages([]);
-        pdfToPages(buf,60).then(p=>{setPdfPages(p);setPdfRendering(false);});
+        pdfToPages(buf2,60).then(p=>{setPdfPages(p);setPdfRendering(false);});
       }else{
         text=await file.text();
       }
@@ -786,12 +794,9 @@ AVOID: Clutter, buzzwords, gradients, pastels, stock photography, exclamation po
     catch(e){setMessages(p=>[...p,{role:"assistant",content:`Something went wrong: ${e.message}`}]);setChatBusy(false);scrollB();return;}
     const imgTag=reply.match(/\[IMG:([^\]]+)\]/);
     if(imgTag&&isPaid&&imgCount<cur.imgs){
-      const gm={role:"assistant",content:reply,genImg:true};
-      setMessages(p=>[...p,gm]);setChatBusy(false);scrollB();
-      try{
-        const url=await generateImage(`${imgTag[1].trim()}. Brand: ${brandName}. Editorial, architectural, high contrast.`);
-        setImgCount(x=>x+1);setMessages(p=>p.map(m=>m===gm?{...m,imageUrl:url,genImg:false}:m));toast_("Image generated ✓");scrollB();
-      }catch(e){setMessages(p=>p.map(m=>m===gm?{...m,genImg:false,content:m.content.replace(/\[IMG:[^\]]*\]/g,"").trim()+`\n(Image failed: ${e.message})`}:m));}
+      const url=makeImageUrl(`${imgTag[1].trim()}. Brand: ${brandName}. Editorial, architectural, high contrast.`);
+      setImgCount(x=>x+1);
+      setMessages(p=>[...p,{role:"assistant",content:reply,imageUrl:url}]);setChatBusy(false);scrollB();
     }else if(imgTag&&!isPaid){
       setMessages(p=>[...p,{role:"assistant",content:reply.replace(/\[IMG:[^\]]*\]/g,"").trim()+"\n\n↑ Upgrade to Series or Scale to generate images."}]);setChatBusy(false);scrollB();
     }else{
@@ -824,15 +829,11 @@ Return ONLY a JSON object (no markdown):
     setCBusy(false);
   };
 
-  const genConceptImg=async i=>{
+  const genConceptImg=i=>{
     if(imgCount>=cur.imgs){setPaywall({reason:plan==="seed"?"3 free images used — upgrade for more.":"Image limit reached this month."});return;}
-    setImgLoading(i);setConcepts(p=>p.map((c,j)=>j===i?{...c,generating:true}:c));
-    try{
-      const c=concepts[i];
-      const url=await generateImage(`${c.mood} brand visual for "${brandName}". ${c.format}. BG:${c.background}. Headline:"${c.headline}". ${(c.visualElements||[]).join(", ")}. ${c.artDirectionNotes}. Editorial, architectural, high contrast.`);
-      setImgCount(x=>x+1);setConcepts(p=>p.map((c,j)=>j===i?{...c,imageUrl:url,generating:false}:c));toast_("Image generated ✓");
-    }catch(e){setConcepts(p=>p.map((c,j)=>j===i?{...c,generating:false}:c));toast_(`Image error: ${e.message}`);}
-    setImgLoading(null);
+    const c=concepts[i];
+    const url=makeImageUrl(`${c.mood} brand visual for "${brandName}". ${c.format}. BG:${c.background}. Headline:"${c.headline}". ${(c.visualElements||[]).join(", ")}. ${c.artDirectionNotes}. Editorial, architectural, high contrast.`);
+    setImgCount(x=>x+1);setConcepts(p=>p.map((c,j)=>j===i?{...c,imageUrl:url,generating:false}:c));toast_("Image loading...");
   };
 
   const addMember=()=>{
@@ -1144,7 +1145,7 @@ Return ONLY a JSON object (no markdown):
                     <div style={{maxWidth:560,margin:"0 auto"}}>
                       {concepts.length===0&&!cBusy&&<div style={{textAlign:"center",paddingTop:40}}><p style={{fontFamily:HN,fontSize:14,color:"#aeaeb2",marginBottom:6}}>No concepts yet.</p><p style={{fontFamily:HN,fontSize:13,color:"#d1d1d6"}}>Describe a format above to generate an on-brand visual brief.</p></div>}
                       {cBusy&&<div style={{display:"flex",alignItems:"center",gap:10,justifyContent:"center",paddingTop:40}}><div style={{width:16,height:16,border:"2px solid #e5e5ea",borderTopColor:"#1d1d1f",borderRadius:"50%",animation:"spin .7s linear infinite"}}/><span style={{fontFamily:HN,fontSize:14,color:"#aeaeb2"}}>Generating concept...</span></div>}
-                      {concepts.map((c,i)=><ConceptCard key={i} c={c} idx={i} isPaid={isPaid} imgLoading={imgLoading} onGen={genConceptImg} onUpgrade={()=>setPaywall({reason:"AI image generation on Series ($29/mo) and Scale ($79/mo)."})}/>)}
+                      {concepts.map((c,i)=><ConceptCard key={i} c={c} idx={i} isPaid={isPaid} onGen={genConceptImg} onUpgrade={()=>setPaywall({reason:"AI image generation on Series ($29/mo) and Scale ($79/mo)."})}/>)}
                     </div>
                   </div>
                 </>
