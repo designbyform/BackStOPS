@@ -116,10 +116,11 @@ async function pdfToPages(buf,max=60) {
 
 // Returns the URL immediately — let <img> tags handle loading/error naturally.
 // The preload-Promise pattern fails in the artifact sandbox because the Image
-// object's onload never fires reliably across iframe security contexts.
+// Pollinations URL — keep prompt under 300 chars to avoid URL length failures
 function makeImageUrl(prompt) {
   const seed=Math.floor(Math.random()*9999999);
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=896&height=504&nologo=true&seed=${seed}`;
+  const p=prompt.length>300?prompt.slice(0,297)+"...":prompt;
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}?width=768&height=432&model=flux&nologo=true&seed=${seed}`;
 }
 
 // Plans
@@ -832,7 +833,7 @@ Return ONLY a JSON object (no markdown):
   const genConceptImg=i=>{
     if(imgCount>=cur.imgs){setPaywall({reason:plan==="seed"?"3 free images used — upgrade for more.":"Image limit reached this month."});return;}
     const c=concepts[i];
-    const url=makeImageUrl(`${c.mood} brand visual for "${brandName}". ${c.format}. BG:${c.background}. Headline:"${c.headline}". ${(c.visualElements||[]).join(", ")}. ${c.artDirectionNotes}. Editorial, architectural, high contrast.`);
+    const url=makeImageUrl(`${c.mood} ${c.format} brand visual, "${c.headline}", ${c.background} background, ${(c.visualElements||[]).slice(0,3).join(", ")}, editorial high contrast photography`);
     setImgCount(x=>x+1);setConcepts(p=>p.map((c,j)=>j===i?{...c,imageUrl:url,generating:false}:c));toast_("Image loading...");
   };
 
