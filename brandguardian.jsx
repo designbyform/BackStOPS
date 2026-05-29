@@ -115,12 +115,17 @@ async function pdfToPages(buf,max=60) {
 }
 
 // Returns the URL immediately — let <img> tags handle loading/error naturally.
-// The preload-Promise pattern fails in the artifact sandbox because the Image
-// Pollinations URL — keep prompt under 300 chars to avoid URL length failures
-function makeImageUrl(prompt) {
+// fetch() + blob URL sidesteps img-src CSP restrictions in the claude.ai sandbox iframe.
+// External <img src="https://..."> silently stalls (onLoad/onError never fire).
+// Blob URLs are always permitted in img-src.
+async function fetchImageBlob(prompt) {
   const seed=Math.floor(Math.random()*9999999);
-  const p=prompt.length>300?prompt.slice(0,297)+"...":prompt;
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}?width=768&height=432&model=flux&nologo=true&seed=${seed}`;
+  const p=prompt.length>280?prompt.slice(0,277)+"...":prompt;
+  const url=`https://image.pollinations.ai/prompt/${encodeURIComponent(p)}?width=768&height=432&model=flux&nologo=true&seed=${seed}`;
+  const res=await fetch(url);
+  if(!res.ok)throw new Error(`HTTP ${res.status}`);
+  const blob=await res.blob();
+  return URL.createObjectURL(blob);
 }
 
 // Plans
@@ -407,6 +412,12 @@ function Bubble({m,onLoad}) {
             {text.split("\n").filter(Boolean).map((l,j,a)=><p key={j} style={{marginBottom:j<a.length-1?5:0}}>{l}</p>)}
           </div>
         )}
+        {m.imageLoading&&(
+          <div style={{borderRadius:12,background:"#f0f0f5",width:"min(280px,75vw)",height:140,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10}}>
+            <div style={{width:18,height:18,border:"2.5px solid #e5e5ea",borderTopColor:"#1d1d1f",borderRadius:"50%",animation:"spin .8s linear infinite"}}/>
+            <span style={{fontFamily:HN,fontSize:12,color:"#aeaeb2"}}>Generating image...</span>
+          </div>
+        )}
         {m.imageUrl&&(
           <div style={{borderRadius:12,overflow:"hidden",boxShadow:"0 4px 20px rgba(0,0,0,.15)",maxWidth:"min(360px,82vw)"}}>
             <img src={m.imageUrl} alt="" style={{width:"100%",display:"block"}} onLoad={onLoad}/>
@@ -461,34 +472,25 @@ function PDFPreview({pages,rendering}) {
 
 function ConceptCard({c,idx,onGen,onUpgrade}) {
   const [cp,setCp]=useState(false);
-  const [imgLoaded,setImgLoaded]=useState(false);
-  const [imgErr,setImgErr]=useState(false);
-  // Reset load state whenever a new imageUrl arrives
-  useEffect(()=>{if(c.imageUrl){setImgLoaded(false);setImgErr(false);}},[c.imageUrl]);
+  // image state lives on the concept object (imageLoading/imageUrl/imageErr) — not local state —
+  // so we don't depend on <img> onLoad/onError which don't fire reliably in sandboxed iframes.
   return(
     <div style={{borderRadius:14,overflow:"hidden",background:"#fff",boxShadow:"0 2px 14px rgba(0,0,0,.08),0 0 0 .5px rgba(0,0,0,.05)",marginBottom:14,animation:`sUp .35s cubic-bezier(.34,1.56,.64,1) ${idx*.05}s both`}}>
-      {c.imageUrl?(
-        <div style={{position:"relative",minHeight:100,background:"#1d1d1f"}}>
-          {!imgLoaded&&!imgErr&&(
-            <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
-              <div style={{width:16,height:16,border:"2px solid rgba(255,255,255,.2)",borderTopColor:"rgba(255,255,255,.8)",borderRadius:"50%",animation:"spin .8s linear infinite"}}/>
-              <span style={{fontFamily:HN,fontSize:11,color:"rgba(255,255,255,.5)"}}>Loading image...</span>
-            </div>
-          )}
-          {imgErr&&(
-            <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,padding:20}}>
-              <span style={{fontFamily:HN,fontSize:12,color:"rgba(255,255,255,.5)",textAlign:"center"}}>Image failed to load</span>
-              <button onClick={()=>{setImgErr(false);setImgLoaded(false);onGen(idx);}} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.2)",borderRadius:8,fontFamily:HN,fontSize:11,color:"#fff",padding:"5px 12px",cursor:"pointer"}}>Retry</button>
-            </div>
-          )}
-          <img src={c.imageUrl} alt="" style={{width:"100%",display:"block",maxHeight:220,objectFit:"cover",opacity:imgLoaded?1:0,transition:"opacity .3s"}}
-            onLoad={()=>setImgLoaded(true)}
-            onError={()=>setImgErr(true)}
-          />
-          {imgLoaded&&(
-            <><a href={c.imageUrl} download="marque.jpg" target="_blank" rel="noreferrer" style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,.5)",backdropFilter:"blur(8px)",borderRadius:8,fontFamily:HN,fontSize:11,color:"#fff",padding:"5px 10px",textDecoration:"none"}}>Download</a>
-            <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,.7))",padding:"20px 16px 12px"}}><p style={{fontFamily:HN,fontSize:"clamp(14px,3vw,20px)",fontWeight:700,color:"#fff",lineHeight:1.1,letterSpacing:"-.02em"}}>{c.headline}</p></div></>
-          )}
+      {c.imageLoading?(
+        <div style={{background:"#1d1d1f",height:180,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10}}>
+          <div style={{width:18,height:18,border:"2.5px solid rgba(255,255,255,.2)",borderTopColor:"rgba(255,255,255,.8)",borderRadius:"50%",animation:"spin .8s linear infinite"}}/>
+          <span style={{fontFamily:HN,fontSize:12,color:"rgba(255,255,255,.5)"}}>Generating image...</span>
+        </div>
+      ):c.imageUrl?(
+        <div style={{position:"relative"}}>
+          <img src={c.imageUrl} alt="" style={{width:"100%",display:"block",maxHeight:220,objectFit:"cover"}}/>
+          <a href={c.imageUrl} download="marque.jpg" target="_blank" rel="noreferrer" style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,.5)",backdropFilter:"blur(8px)",borderRadius:8,fontFamily:HN,fontSize:11,color:"#fff",padding:"5px 10px",textDecoration:"none"}}>Download</a>
+          <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,.7))",padding:"20px 16px 12px"}}><p style={{fontFamily:HN,fontSize:"clamp(14px,3vw,20px)",fontWeight:700,color:"#fff",lineHeight:1.1,letterSpacing:"-.02em"}}>{c.headline}</p></div>
+        </div>
+      ):c.imageErr?(
+        <div style={{background:"#1d1d1f",height:140,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,padding:20}}>
+          <span style={{fontFamily:HN,fontSize:12,color:"rgba(255,255,255,.5)",textAlign:"center"}}>Image failed — tap Retry</span>
+          <button onClick={()=>onGen(idx)} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.2)",borderRadius:8,fontFamily:HN,fontSize:11,color:"#fff",padding:"5px 12px",cursor:"pointer"}}>Retry</button>
         </div>
       ):(
         <div style={{background:c.background||"#1d1d1f",minHeight:160,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"28px 20px",position:"relative"}}>
@@ -795,9 +797,15 @@ AVOID: Clutter, buzzwords, gradients, pastels, stock photography, exclamation po
     catch(e){setMessages(p=>[...p,{role:"assistant",content:`Something went wrong: ${e.message}`}]);setChatBusy(false);scrollB();return;}
     const imgTag=reply.match(/\[IMG:([^\]]+)\]/);
     if(imgTag&&isPaid&&imgCount<cur.imgs){
-      const url=makeImageUrl(`${imgTag[1].trim()}. Brand: ${brandName}. Editorial, architectural, high contrast.`);
-      setImgCount(x=>x+1);
-      setMessages(p=>[...p,{role:"assistant",content:reply,imageUrl:url}]);setChatBusy(false);scrollB();
+      const gm={role:"assistant",content:reply,imageLoading:true};
+      setMessages(p=>[...p,gm]);setChatBusy(false);scrollB();
+      try{
+        const blobUrl=await fetchImageBlob(`${imgTag[1].trim()}. Brand: ${brandName}. Editorial, architectural, high contrast.`);
+        setImgCount(x=>x+1);
+        setMessages(p=>p.map(m=>m===gm?{...m,imageLoading:false,imageUrl:blobUrl}:m));scrollB();
+      }catch(e){
+        setMessages(p=>p.map(m=>m===gm?{...m,imageLoading:false,content:m.content.replace(/\[IMG:[^\]]*\]/g,"").trim()+"\n(Image generation failed)"}:m));
+      }
     }else if(imgTag&&!isPaid){
       setMessages(p=>[...p,{role:"assistant",content:reply.replace(/\[IMG:[^\]]*\]/g,"").trim()+"\n\n↑ Upgrade to Series or Scale to generate images."}]);setChatBusy(false);scrollB();
     }else{
@@ -830,11 +838,19 @@ Return ONLY a JSON object (no markdown):
     setCBusy(false);
   };
 
-  const genConceptImg=i=>{
+  const genConceptImg=async i=>{
     if(imgCount>=cur.imgs){setPaywall({reason:plan==="seed"?"3 free images used — upgrade for more.":"Image limit reached this month."});return;}
     const c=concepts[i];
-    const url=makeImageUrl(`${c.mood} ${c.format} brand visual, "${c.headline}", ${c.background} background, ${(c.visualElements||[]).slice(0,3).join(", ")}, editorial high contrast photography`);
-    setImgCount(x=>x+1);setConcepts(p=>p.map((c,j)=>j===i?{...c,imageUrl:url,generating:false}:c));toast_("Image loading...");
+    setConcepts(p=>p.map((c,j)=>j===i?{...c,imageLoading:true,imageErr:null,imageUrl:null}:c));
+    try{
+      const blobUrl=await fetchImageBlob(`${c.mood} ${c.format} brand visual, "${c.headline}", ${c.background} background, ${(c.visualElements||[]).slice(0,3).join(", ")}, editorial high contrast photography`);
+      setImgCount(x=>x+1);
+      setConcepts(p=>p.map((c,j)=>j===i?{...c,imageLoading:false,imageUrl:blobUrl}:c));
+      toast_("Image generated ✓");
+    }catch(e){
+      setConcepts(p=>p.map((c,j)=>j===i?{...c,imageLoading:false,imageErr:e.message}:c));
+      toast_(`Image failed: ${e.message}`);
+    }
   };
 
   const addMember=()=>{
