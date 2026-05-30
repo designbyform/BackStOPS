@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -119,6 +119,125 @@ const BRAND_BRAIN = {
     { id: "category", title: "Category Confusion", severity: "Low", finding: "Category name is accurate but may be unfamiliar to buyers who search for \"scheduling software\" or \"credentialing software.\"", evidence: "Category label used inconsistently across surfaces — sometimes \"clinical ops platform,\" sometimes \"healthcare operations software.\"", recommendation: "Standardize category language. Consider whether to own the new category or ride existing search categories while differentiating within them." },
   ],
 };
+
+// ─── Extraction helpers ───────────────────────────────────────────────────────
+
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function extractTextFromPDF(file) {
+  try {
+    const buffer = await file.arrayBuffer();
+    const raw = new TextDecoder("latin1").decode(new Uint8Array(buffer));
+    const blocks = [];
+    const btEt = raw.match(/BT[\s\S]*?ET/g) ?? [];
+    for (const block of btEt) {
+      const tj = (block.match(/\(([^)]*)\)\s*(?:Tj|')/g) ?? [])
+        .map(m => m.replace(/^\(|\)\s*(?:Tj|')$/g, "").replace(/\\n/g, " "))
+        .join(" ");
+      const tjArr = (block.match(/\[([^\]]*)\]\s*TJ/g) ?? [])
+        .map(m => {
+          const inner = m.replace(/^\[|\]\s*TJ$/g, "");
+          return (inner.match(/\(([^)]*)\)/g) ?? []).map(s => s.replace(/[()]/g, "")).join("");
+        }).join(" ");
+      const combined = [tj, tjArr].filter(Boolean).join(" ").trim();
+      if (combined.length > 5) blocks.push(combined);
+    }
+    const text = blocks.join("\n").replace(/\s{2,}/g, " ").trim();
+    return text.length > 50 ? text.slice(0, 10000) : "";
+  } catch { return ""; }
+}
+
+async function callClaude(prompt, apiKey) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 8000,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Claude API error ${res.status}: ${err?.error?.message ?? res.statusText}`);
+  }
+  const data = await res.json();
+  return data.content?.[0]?.text ?? "";
+}
+
+function buildExtractionPrompt(project, assets, brandGuideText, pitchDeckText) {
+  const sections = [];
+  if (brandGuideText) sections.push(`BRAND GUIDE:\n${brandGuideText}`);
+  if (pitchDeckText) sections.push(`PITCH DECK:\n${pitchDeckText}`);
+  if (assets.socialExamples?.trim()) sections.push(`SOCIAL COPY EXAMPLES:\n${assets.socialExamples}`);
+  if (assets.messagingExamples?.trim()) sections.push(`MESSAGING / WEBSITE COPY:\n${assets.messagingExamples}`);
+  if (assets.visualNotes?.trim()) sections.push(`VISUAL NOTES:\n${assets.visualNotes}`);
+  if (assets.competitorUrls?.trim()) sections.push(`COMPETITOR CONTEXT:\n${assets.competitorUrls}`);
+  const materialsBlock = sections.length > 0 ? sections.join("\n\n---\n\n") : "No brand materials submitted — use company information only.";
+  return `You are a brand intelligence analyst performing a structured Brand MRI extraction.
+
+COMPANY:
+- Name: ${project.companyName}
+- Website: ${project.websiteUrl || "Not provided"}
+- Industry: ${project.industry || "Not provided"}
+- Stage: ${project.stage}
+- Stated primary audience: ${project.primaryAudience || "Not provided"}
+- Notes: ${project.notes || "None"}
+
+BRAND MATERIALS:
+${materialsBlock}
+
+---
+
+Extract a complete Brand Brain. Ground every field in the actual submitted content. Where evidence is thin, use a low confidence score. Do not fabricate specifics.
+
+Confidence: 80-95 = strong evidence; 60-79 = clear evidence, minor inference; 40-59 = partial evidence; 20-39 = very little evidence; 10-19 = cannot determine.
+
+Return ONLY valid JSON — no markdown fences, no explanation:
+
+{"strategicDNA":{"mission":{"value":"","confidence":0,"source":""},"vision":{"value":"","confidence":0,"source":""},"purpose":{"value":"","confidence":0,"source":""},"category":{"value":"","confidence":0,"source":""},"positioningStatement":{"value":"","confidence":0,"source":""},"corePromise":{"value":"","confidence":0,"source":""},"primaryAudience":{"value":"","confidence":0,"source":""},"secondaryAudience":{"value":"","confidence":0,"source":""},"differentiators":{"values":[],"confidence":0,"source":""},"proofPoints":{"values":[],"confidence":0,"source":""},"marketContext":{"value":"","confidence":0,"source":""},"brandTension":{"value":"","confidence":0,"source":""}},"personalityModel":{"authority":{"score":50,"rationale":"","confidence":0},"warmth":{"score":50,"rationale":"","confidence":0},"technicalDepth":{"score":50,"rationale":"","confidence":0},"innovation":{"score":50,"rationale":"","confidence":0},"playfulness":{"score":50,"rationale":"","confidence":0},"sophistication":{"score":50,"rationale":"","confidence":0},"boldness":{"score":50,"rationale":"","confidence":0},"clarity":{"score":50,"rationale":"","confidence":0},"restraint":{"score":50,"rationale":"","confidence":0},"emotionality":{"score":50,"rationale":"","confidence":0}},"verbalSystem":{"voicePrinciples":{"values":[],"confidence":0,"source":""},"toneAttributes":{"values":[],"confidence":0,"source":""},"messagingHierarchy":{"values":[],"confidence":0,"source":""},"elevatorPitch":{"value":"","confidence":0,"source":""},"approvedVocabulary":{"values":[],"confidence":0,"source":""},"bannedVocabulary":{"values":[],"confidence":0,"source":""},"phrasesToAvoid":{"values":[],"confidence":0,"source":""},"onBrandCopy":{"value":"","confidence":0,"source":""},"offBrandCopy":{"value":"","confidence":0,"source":""}},"visualSystem":{"colorLogic":{"value":"","confidence":0,"source":""},"typographyLogic":{"value":"","confidence":0,"source":""},"layoutPrinciples":{"value":"","confidence":0,"source":""},"photographyStyle":{"value":"","confidence":0,"source":""},"visualReferences":{"values":[],"confidence":0,"source":""},"visualPatternsToAvoid":{"values":[],"confidence":0,"source":""}},"decisionRules":{"rules":[{"rule":"","whyItMatters":"","exampleApplication":"","confidence":0}]},"competitiveContext":{"directCompetitors":{"values":[],"confidence":0,"source":""},"adjacentCompetitors":{"values":[],"confidence":0,"source":""},"similarityRisks":{"values":[],"confidence":0,"source":""},"whiteSpaceOpportunities":{"values":[],"confidence":0,"source":""}},"brandDiagnosis":{"messagingInconsistency":{"id":"messaging-inconsistency","title":"Messaging Inconsistency","severity":"Low","finding":"","evidence":"","recommendation":""},"visualInconsistency":{"id":"visual-inconsistency","title":"Visual Inconsistency","severity":"Low","finding":"","evidence":"","recommendation":""},"audienceClarity":{"id":"audience-clarity","title":"Audience Clarity Issue","severity":"Low","finding":"","evidence":"","recommendation":""},"categoryConfusion":{"id":"category-confusion","title":"Category Confusion","severity":"Low","finding":"","evidence":"","recommendation":""},"genericLanguageRisk":{"id":"generic-language","title":"Generic Language Risk","severity":"Low","finding":"","evidence":"","recommendation":""},"trustGap":{"id":"trust-gap","title":"Trust Gap","severity":"Low","finding":"","evidence":"","recommendation":""},"differentiationGap":{"id":"differentiation-gap","title":"Differentiation Gap","severity":"Low","finding":"","evidence":"","recommendation":""}}}
+
+Now extract the Brand Brain for ${project.companyName}.`;
+}
+
+function mapRawToBrain(raw, project) {
+  const s = raw.strategicDNA ?? {}, p = raw.personalityModel ?? {}, v = raw.verbalSystem ?? {};
+  const vis = raw.visualSystem ?? {}, dr = raw.decisionRules ?? {}, cc = raw.competitiveContext ?? {};
+  const bd = raw.brandDiagnosis ?? {};
+
+  function jf(f, fallback = "Not identified — add manually") {
+    const conf = typeof f?.confidence === "number" ? f.confidence : 20;
+    return { value: typeof f?.value === "string" && f.value.trim() ? f.value : fallback, confidence: conf, confidenceLevel: conf >= 75 ? "high" : conf >= 45 ? "medium" : "low", source: typeof f?.source === "string" ? f.source : "Extracted", needsReview: conf < 60 };
+  }
+  function jlf(f) {
+    const conf = typeof f?.confidence === "number" ? f.confidence : 20;
+    return { values: Array.isArray(f?.values) ? f.values.filter(Boolean) : [], confidence: conf, confidenceLevel: conf >= 75 ? "high" : conf >= 45 ? "medium" : "low", source: typeof f?.source === "string" ? f.source : "Extracted", needsReview: conf < 60 };
+  }
+  function jt(t) {
+    const conf = typeof t?.confidence === "number" ? t.confidence : 30;
+    return { score: typeof t?.score === "number" ? Math.max(0, Math.min(100, t.score)) : 50, rationale: typeof t?.rationale === "string" ? t.rationale : "", confidence: conf, confidenceLevel: conf >= 75 ? "high" : conf >= 45 ? "medium" : "low" };
+  }
+
+  const diagKeys = ["messagingInconsistency","visualInconsistency","audienceClarity","categoryConfusion","genericLanguageRisk","trustGap","differentiationGap"];
+  const diagTitles = { messagingInconsistency:"Messaging Inconsistency", visualInconsistency:"Visual Inconsistency", audienceClarity:"Audience Clarity Issue", categoryConfusion:"Category Confusion", genericLanguageRisk:"Generic Language Risk", trustGap:"Trust Gap", differentiationGap:"Differentiation Gap" };
+
+  return {
+    project,
+    generatedAt: new Date().toISOString(),
+    strategicDNA: { mission: jf(s.mission), vision: jf(s.vision), purpose: jf(s.purpose), category: jf(s.category), positioningStatement: jf(s.positioningStatement), corePromise: jf(s.corePromise), primaryAudience: jf(s.primaryAudience), secondaryAudience: jf(s.secondaryAudience), differentiators: jlf(s.differentiators), proofPoints: jlf(s.proofPoints), marketContext: jf(s.marketContext), brandTension: jf(s.brandTension) },
+    personalityModel: { authority: jt(p.authority), warmth: jt(p.warmth), technicalDepth: jt(p.technicalDepth), innovation: jt(p.innovation), playfulness: jt(p.playfulness), sophistication: jt(p.sophistication), boldness: jt(p.boldness), clarity: jt(p.clarity), restraint: jt(p.restraint), emotionality: jt(p.emotionality) },
+    verbalSystem: { voicePrinciples: jlf(v.voicePrinciples), toneAttributes: jlf(v.toneAttributes), messagingHierarchy: jlf(v.messagingHierarchy), elevatorPitch: jf(v.elevatorPitch), approvedVocabulary: jlf(v.approvedVocabulary), bannedVocabulary: jlf(v.bannedVocabulary), phrasesToAvoid: jlf(v.phrasesToAvoid), onBrandCopy: jf(v.onBrandCopy), offBrandCopy: jf(v.offBrandCopy) },
+    visualSystem: { colorLogic: jf(vis.colorLogic), typographyLogic: jf(vis.typographyLogic), photographyStyle: jf(vis.photographyStyle), layoutPrinciples: jf(vis.layoutPrinciples), visualReferences: jlf(vis.visualReferences), visualPatternsToAvoid: jlf(vis.visualPatternsToAvoid) },
+    decisionRules: Array.isArray(dr.rules) ? dr.rules.map(r => ({ rule: r?.rule ?? "", why: r?.whyItMatters ?? r?.why ?? "", example: r?.exampleApplication ?? r?.example ?? "", confidence: typeof r?.confidence === "number" ? r.confidence : 40 })) : [],
+    competitiveContext: { directCompetitors: jlf(cc.directCompetitors), adjacentCompetitors: jlf(cc.adjacentCompetitors), similarityRisks: jlf(cc.similarityRisks), whiteSpaceOpportunities: jlf(cc.whiteSpaceOpportunities) },
+    brandDiagnosis: diagKeys.map(key => { const d = bd[key] ?? {}; return { id: d.id ?? key, title: d.title ?? diagTitles[key], severity: ["Low","Medium","High"].includes(d.severity) ? d.severity : "Low", finding: d.finding ?? "Not assessed.", evidence: d.evidence ?? "", recommendation: d.recommendation ?? "" }; }),
+  };
+}
 
 // ─── UI primitives ────────────────────────────────────────────────────────────
 
@@ -377,41 +496,89 @@ function Field({ ...props }) {
 
 // ─── Page: Upload ─────────────────────────────────────────────────────────────
 
-function Upload({ step, setStep, hasBrain, onStart }) {
-  const [social, setSocial] = useState("");
-  const [messaging, setMessaging] = useState("");
+function Upload({ step, setStep, hasBrain, onStart, apiKey, setApiKey, assets, updateAssets }) {
+  const [showKey, setShowKey] = useState(false);
+  const hasContent = assets.brandGuidePdf !== null || assets.pitchDeckPdf !== null ||
+    assets.socialExamples.trim() || assets.messagingExamples.trim() || assets.visualNotes.trim();
+
   return (
     <Shell step={step} setStep={setStep} hasBrain={hasBrain} title="Asset Upload" subtitle="Add everything you have. The more context, the higher the confidence scores.">
       <div style={{ padding: "32px 40px", maxWidth: 680 }}>
+
+        <Section title="Anthropic API Key">
+          <div style={{ position: "relative", marginBottom: 8 }}>
+            <input
+              type={showKey ? "text" : "password"}
+              placeholder="sk-ant-..."
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              style={{ width: "100%", padding: "8px 48px 8px 12px", fontSize: 13, border: `1px solid ${C.border}`, borderRadius: 6, background: C.white, color: C.ink, fontFamily: "monospace", boxSizing: "border-box", outline: "none" }}
+            />
+            <button type="button" onClick={() => setShowKey(s => !s)}
+              style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", fontSize: 10, color: C.inkTertiary, background: "transparent", border: "none", cursor: "pointer", fontFamily: F.family }}>
+              {showKey ? "Hide" : "Show"}
+            </button>
+          </div>
+          <p style={{ margin: "0 0 8px", fontSize: 11, color: C.inkTertiary, lineHeight: 1.5 }}>
+            Used only in your browser to call the Claude API directly. Never stored or sent elsewhere.
+          </p>
+          {!apiKey.trim() && (
+            <p style={{ margin: 0, fontSize: 11, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 4, padding: "6px 10px", lineHeight: 1.5 }}>
+              Without an API key, the scan will load sample Meridian Health data instead of extracting from your uploads.
+            </p>
+          )}
+        </Section>
+
         <Section title="Documents">
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <DropZone label="Brand Guide PDF" desc="Brand guidelines, style guide, identity manual" />
-            <DropZone label="Pitch Deck PDF" desc="Investor deck, sales deck, company overview" />
+            <DropZone label="Brand Guide PDF" desc="Brand guidelines, style guide, identity manual" file={assets.brandGuidePdf} onChange={f => updateAssets({ brandGuidePdf: f })} />
+            <DropZone label="Pitch Deck PDF" desc="Investor deck, sales deck, company overview" file={assets.pitchDeckPdf} onChange={f => updateAssets({ pitchDeckPdf: f })} />
           </div>
         </Section>
+
         <Section title="Copy & Examples">
           <div style={{ marginBottom: 14 }}>
             <Label>Social copy examples</Label>
-            <textarea value={social} onChange={e => setSocial(e.target.value)} rows={4} placeholder="Paste 3–5 LinkedIn posts or social captions that represent the brand voice at its best..." style={{ width: "100%", padding: "8px 12px", fontSize: 13, border: `1px solid ${C.border}`, borderRadius: 6, background: C.white, color: C.ink, fontFamily: F.family, resize: "none", boxSizing: "border-box" }} />
+            <textarea value={assets.socialExamples} onChange={e => updateAssets({ socialExamples: e.target.value })} rows={4} placeholder="Paste 3–5 LinkedIn posts or social captions that represent the brand voice at its best..." style={{ width: "100%", padding: "8px 12px", fontSize: 13, border: `1px solid ${C.border}`, borderRadius: 6, background: C.white, color: C.ink, fontFamily: F.family, resize: "none", boxSizing: "border-box" }} />
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <Label>Messaging examples</Label>
+            <textarea value={assets.messagingExamples} onChange={e => updateAssets({ messagingExamples: e.target.value })} rows={4} placeholder="Paste website copy, email campaigns, sales collateral..." style={{ width: "100%", padding: "8px 12px", fontSize: 13, border: `1px solid ${C.border}`, borderRadius: 6, background: C.white, color: C.ink, fontFamily: F.family, resize: "none", boxSizing: "border-box" }} />
           </div>
           <div>
-            <Label>Messaging examples</Label>
-            <textarea value={messaging} onChange={e => setMessaging(e.target.value)} rows={4} placeholder="Paste website copy, email campaigns, sales collateral..." style={{ width: "100%", padding: "8px 12px", fontSize: 13, border: `1px solid ${C.border}`, borderRadius: 6, background: C.white, color: C.ink, fontFamily: F.family, resize: "none", boxSizing: "border-box" }} />
+            <Label>Visual notes</Label>
+            <textarea value={assets.visualNotes} onChange={e => updateAssets({ visualNotes: e.target.value })} rows={3} placeholder="Describe your visual direction — colors, fonts, photography style..." style={{ width: "100%", padding: "8px 12px", fontSize: 13, border: `1px solid ${C.border}`, borderRadius: 6, background: C.white, color: C.ink, fontFamily: F.family, resize: "none", boxSizing: "border-box" }} />
           </div>
         </Section>
 
-        <div style={{ padding: 14, background: C.bgSecondary, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: 24, display: "flex", gap: 10 }}>
-          <div style={{ width: 18, height: 18, background: C.bgTertiary, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <span style={{ fontSize: 10, color: C.inkSecondary }}>i</span>
+        <Section title="Competitive Context">
+          <Label>Competitor URLs or names</Label>
+          <textarea value={assets.competitorUrls} onChange={e => updateAssets({ competitorUrls: e.target.value })} rows={3} placeholder="Symplr, Qgenda, https://competitor.com — one per line..." style={{ width: "100%", padding: "8px 12px", fontSize: 13, border: `1px solid ${C.border}`, borderRadius: 6, background: C.white, color: C.ink, fontFamily: F.family, resize: "none", boxSizing: "border-box" }} />
+        </Section>
+
+        {apiKey.trim() ? (
+          <div style={{ padding: 14, background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 8, marginBottom: 24, display: "flex", gap: 10 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#2D6A4F", marginTop: 4, flexShrink: 0 }} />
+            <div>
+              <p style={{ margin: "0 0 3px", fontSize: 12, fontWeight: 500, color: "#1A3C2E" }}>Real extraction enabled</p>
+              <p style={{ margin: 0, fontSize: 11, color: "#2D6A4F", lineHeight: 1.5 }}>
+                Claude will extract the Brand Brain directly from your uploaded content.
+                {!hasContent && " Add at least one text field or PDF for best results."}
+              </p>
+            </div>
           </div>
-          <div>
-            <p style={{ margin: "0 0 3px", fontSize: 12, fontWeight: 500, color: C.inkSecondary }}>MVP mode — mock extraction active</p>
-            <p style={{ margin: 0, fontSize: 11, color: C.inkTertiary, lineHeight: 1.5 }}>Uploaded assets are noted but not parsed by AI. The Brand Brain is populated with structured sample data for Meridian Health. To connect real extraction, replace <code style={{ fontFamily: "monospace", color: C.ink }}>generateBrandBrain()</code> in <code style={{ fontFamily: "monospace", color: C.ink }}>src/lib/generators.ts</code>.</p>
+        ) : (
+          <div style={{ padding: 14, background: C.bgSecondary, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: 24, display: "flex", gap: 10 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#D97706", marginTop: 4, flexShrink: 0 }} />
+            <div>
+              <p style={{ margin: "0 0 3px", fontSize: 12, fontWeight: 500, color: C.inkSecondary }}>Demo mode — sample data will load</p>
+              <p style={{ margin: 0, fontSize: 11, color: C.inkTertiary, lineHeight: 1.5 }}>Add an Anthropic API key above to extract from your actual brand materials.</p>
+            </div>
           </div>
-        </div>
+        )}
 
         <div style={{ display: "flex", gap: 10 }}>
-          <Btn onClick={onStart}>Run Brand MRI Scan</Btn>
+          <Btn onClick={onStart}>{apiKey.trim() ? "Run Brand MRI Scan" : "Load Sample Data"}</Btn>
           <Btn variant="ghost" onClick={() => setStep("new-scan")}>Back</Btn>
         </div>
       </div>
@@ -423,11 +590,10 @@ function Section({ title, children }) {
   return <div style={{ marginBottom: 28 }}><p style={{ margin: "0 0 12px", fontSize: 10, fontWeight: 700, color: C.inkTertiary, letterSpacing: "0.1em", textTransform: "uppercase" }}>{title}</p>{children}</div>;
 }
 
-function DropZone({ label, desc }) {
-  const [file, setFile] = useState(null);
+function DropZone({ label, desc, file, onChange }) {
   return (
     <label style={{ display: "block", border: `2px dashed ${C.border}`, borderRadius: 8, padding: 20, cursor: "pointer" }}>
-      <input type="file" accept=".pdf" style={{ display: "none" }} onChange={e => setFile(e.target.files?.[0] || null)} />
+      <input type="file" accept=".pdf" style={{ display: "none" }} onChange={e => onChange(e.target.files?.[0] || null)} />
       {file ? (
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 32, height: 32, background: C.ink, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -451,61 +617,119 @@ function DropZone({ label, desc }) {
 
 // ─── Page: Processing ─────────────────────────────────────────────────────────
 
-const SCAN_STEPS = [
-  { id: "dna", label: "Extracting brand DNA", ms: 1400 },
-  { id: "verbal", label: "Identifying verbal patterns", ms: 1200 },
-  { id: "visual", label: "Mapping visual language", ms: 1300 },
-  { id: "rules", label: "Finding decision rules", ms: 1100 },
-  { id: "brain", label: "Generating Brand Brain", ms: 1500 },
-  { id: "prompts", label: "Calibrating prompt library", ms: 900 },
+const SCAN_STEP_LABELS = [
+  "Reading uploaded files",
+  "Sending to Claude for extraction",
+  "Parsing Brand Brain",
+  "Mapping to Brand Brain schema",
+  "Calibrating confidence scores",
+  "Building prompt library",
 ];
 
-function Processing({ setStep }) {
+function Processing({ project, assets, apiKey, setBrain, setStep }) {
   const [current, setCurrent] = useState(0);
   const [done, setDone] = useState(false);
+  const [error, setError] = useState(null);
+  const ran = useRef(false);
 
   useEffect(() => {
-    let total = 0;
-    const timers = [];
-    SCAN_STEPS.forEach((s, i) => {
-      timers.push(setTimeout(() => setCurrent(i), total));
-      total += s.ms;
-    });
-    timers.push(setTimeout(() => { setCurrent(SCAN_STEPS.length); setDone(true); }, total + 500));
-    return () => timers.forEach(clearTimeout);
+    if (ran.current) return;
+    ran.current = true;
+
+    async function run() {
+      if (!apiKey.trim()) {
+        for (let i = 0; i < SCAN_STEP_LABELS.length; i++) {
+          setCurrent(i);
+          await delay(900 + Math.random() * 600);
+        }
+        setBrain({ ...BRAND_BRAIN, project: { ...BRAND_BRAIN.project, ...project } });
+        setDone(true);
+        return;
+      }
+      try {
+        setCurrent(0);
+        const brandGuideText = assets.brandGuidePdf ? await extractTextFromPDF(assets.brandGuidePdf) : "";
+        const pitchDeckText = assets.pitchDeckPdf ? await extractTextFromPDF(assets.pitchDeckPdf) : "";
+        setCurrent(1);
+        const prompt = buildExtractionPrompt(project, assets, brandGuideText, pitchDeckText);
+        const rawText = await callClaude(prompt, apiKey);
+        setCurrent(2);
+        const cleaned = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+        let parsed;
+        try { parsed = JSON.parse(cleaned); } catch {
+          const match = cleaned.match(/\{[\s\S]*\}/);
+          if (!match) throw new Error("Claude returned unparseable output. Try again or check your API key.");
+          parsed = JSON.parse(match[0]);
+        }
+        setCurrent(3);
+        const brain = mapRawToBrain(parsed, project);
+        for (let i = 4; i < SCAN_STEP_LABELS.length; i++) { setCurrent(i); await delay(400); }
+        setBrain(brain);
+        setDone(true);
+      } catch (err) {
+        setError(err.message || String(err));
+      }
+    }
+    void run();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (done) { const t = setTimeout(() => setStep("brand-brain"), 1200); return () => clearTimeout(t); }
+    if (done) { const t = setTimeout(() => setStep("brand-brain"), 1000); return () => clearTimeout(t); }
   }, [done, setStep]);
 
-  const pct = done ? 100 : Math.round((current / SCAN_STEPS.length) * 100);
+  const pct = done ? 100 : Math.round(((current + 1) / SCAN_STEP_LABELS.length) * 100);
+
+  const logo = (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 48 }}>
+      <div style={{ width: 24, height: 24, background: C.ink, borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ color: C.white, fontSize: 11, fontWeight: 700 }}>M</span>
+      </div>
+      <span style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>Brand MRI</span>
+    </div>
+  );
+
+  if (error) {
+    return (
+      <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.family }}>
+        <div style={{ width: 360, padding: "0 24px" }}>
+          {logo}
+          <h2 style={{ margin: "0 0 8px", fontSize: 18, fontWeight: 600, color: C.ink }}>Extraction failed</h2>
+          <p style={{ margin: "0 0 16px", fontSize: 13, color: "#DC2626", lineHeight: 1.5 }}>{error}</p>
+          <p style={{ margin: "0 0 16px", fontSize: 12, color: C.inkTertiary }}>Check your API key and try again, or continue with sample data.</p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Btn onClick={() => setStep("upload")}>Go back</Btn>
+            <Btn variant="ghost" onClick={() => { setBrain({ ...BRAND_BRAIN, project: { ...BRAND_BRAIN.project, ...project } }); setStep("brand-brain"); }}>Load sample data</Btn>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F.family }}>
       <div style={{ width: 360, padding: "0 24px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 48 }}>
-          <div style={{ width: 24, height: 24, background: C.ink, borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ color: C.white, fontSize: 11, fontWeight: 700 }}>M</span>
-          </div>
-          <span style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>Brand MRI</span>
-        </div>
-        <h2 style={{ margin: "0 0 6px", fontSize: 20, fontWeight: 600, color: C.ink }}>{done ? "Scan complete." : "Scanning brand assets..."}</h2>
-        <p style={{ margin: "0 0 28px", fontSize: 13, color: C.inkSecondary }}>{done ? "Your Brand Brain is ready for review." : "Extracting structure, patterns, and identity signals."}</p>
+        {logo}
+        <h2 style={{ margin: "0 0 6px", fontSize: 20, fontWeight: 600, color: C.ink }}>
+          {done ? "Scan complete." : (apiKey.trim() ? "Extracting brand intelligence..." : "Scanning brand assets...")}
+        </h2>
+        <p style={{ margin: "0 0 28px", fontSize: 13, color: C.inkSecondary }}>
+          {done ? "Your Brand Brain is ready for review." : apiKey.trim() ? "Claude is reading your brand materials and building the Brand Brain." : "Loading sample data — add an API key to extract from real materials."}
+        </p>
 
         <div style={{ marginBottom: 28 }}>
           <div style={{ height: 2, background: C.border, borderRadius: 99, overflow: "hidden" }}>
-            <div style={{ height: "100%", background: C.ink, borderRadius: 99, width: `${pct}%`, transition: "width 0.5s ease-out" }} />
+            <div style={{ height: "100%", background: C.ink, borderRadius: 99, width: `${pct}%`, transition: "width 0.7s ease-out" }} />
           </div>
           <p style={{ margin: "6px 0 0", fontSize: 11, color: C.inkTertiary }}>{pct}%</p>
         </div>
 
         <div>
-          {SCAN_STEPS.map((s, i) => {
+          {SCAN_STEP_LABELS.map((label, i) => {
             const isActive = i === current && !done;
             const isDone = i < current || done;
             return (
-              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "6px 0" }}>
+              <div key={label} style={{ display: "flex", alignItems: "center", gap: 12, padding: "6px 0" }}>
                 <div style={{ width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   {isDone ? (
                     <div style={{ width: 14, height: 14, borderRadius: "50%", background: C.ink, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -517,7 +741,7 @@ function Processing({ setStep }) {
                     <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.border }} />
                   )}
                 </div>
-                <span style={{ fontSize: 13, color: isDone ? C.ink : isActive ? C.ink : C.inkFaint, fontWeight: isActive ? 500 : 400 }}>{s.label}</span>
+                <span style={{ fontSize: 13, color: isDone ? C.ink : isActive ? C.ink : C.inkFaint, fontWeight: isActive ? 500 : 400 }}>{label}</span>
               </div>
             );
           })}
@@ -1377,19 +1601,19 @@ export default function BrandMRI() {
   const [step, setStep] = useState("landing");
   const [project, setProject] = useState({ companyName: "", websiteUrl: "", industry: "", stage: "Seed", primaryAudience: "", notes: "" });
   const [brain, setBrain] = useState(null);
+  const [apiKey, setApiKey] = useState("");
+  const [assets, setAssets] = useState({ brandGuidePdf: null, pitchDeckPdf: null, socialExamples: "", messagingExamples: "", visualNotes: "", competitorUrls: "" });
 
-  function startScan() {
-    setBrain({ ...BRAND_BRAIN, project: { ...BRAND_BRAIN.project, ...project } });
-    setStep("processing");
-  }
+  function updateAssets(updates) { setAssets(a => ({ ...a, ...updates })); }
+  function startScan() { setStep("processing"); }
 
   const hasBrain = brain !== null;
 
   switch (step) {
     case "landing":    return <Landing setStep={setStep} />;
     case "new-scan":   return <NewScan step={step} setStep={setStep} project={project} setProject={setProject} hasBrain={hasBrain} />;
-    case "upload":     return <Upload step={step} setStep={setStep} hasBrain={hasBrain} onStart={startScan} />;
-    case "processing": return <Processing setStep={setStep} />;
+    case "upload":     return <Upload step={step} setStep={setStep} hasBrain={hasBrain} onStart={startScan} apiKey={apiKey} setApiKey={setApiKey} assets={assets} updateAssets={updateAssets} />;
+    case "processing": return <Processing project={project} assets={assets} apiKey={apiKey} setBrain={setBrain} setStep={setStep} />;
     case "brand-brain":return hasBrain ? <BrandBrainPage step={step} setStep={setStep} hasBrain={hasBrain} brain={brain} setBrain={setBrain} /> : <Landing setStep={setStep} />;
     case "diagnosis":  return hasBrain ? <DiagnosisPage step={step} setStep={setStep} hasBrain={hasBrain} brain={brain} /> : <Landing setStep={setStep} />;
     case "prompts":    return hasBrain ? <PromptsPage step={step} setStep={setStep} hasBrain={hasBrain} brain={brain} /> : <Landing setStep={setStep} />;
