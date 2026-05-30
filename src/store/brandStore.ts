@@ -7,7 +7,7 @@ import type {
   PromptLibrary,
   CompanyStage,
 } from '../types/brandBrain'
-import { generateBrandBrain, generatePromptLibrary } from '../lib/generators'
+import { generatePromptLibrary } from '../lib/generators'
 
 interface BrandStore {
   // Navigation
@@ -22,12 +22,19 @@ interface BrandStore {
   assets: AssetInputs
   updateAssets: (updates: Partial<AssetInputs>) => void
 
+  // API key (held in memory only, never persisted)
+  apiKey: string
+  setApiKey: (key: string) => void
+
   // Brand Brain
   brandBrain: BrandBrain | null
-  startProcessing: () => void
   setBrandBrain: (brain: BrandBrain) => void
   updateBrandBrainField: (path: string, value: string | string[] | number) => void
   approveBrandBrain: () => void
+
+  // Extraction error
+  extractionError: string | null
+  setExtractionError: (err: string | null) => void
 
   // Prompt library
   promptLibrary: PromptLibrary | null
@@ -71,12 +78,10 @@ export const useBrandStore = create<BrandStore>((set, get) => ({
   updateAssets: (updates) =>
     set((state) => ({ assets: { ...state.assets, ...updates } })),
 
+  apiKey: '',
+  setApiKey: (key) => set({ apiKey: key }),
+
   brandBrain: null,
-  startProcessing: () => {
-    // Processing UI handles the delay; this triggers after scanning completes
-    const brain = generateBrandBrain(get().project)
-    set({ brandBrain: brain })
-  },
   setBrandBrain: (brain) => set({ brandBrain: brain }),
 
   // Deep path update for nested brand brain fields
@@ -102,6 +107,9 @@ export const useBrandStore = create<BrandStore>((set, get) => ({
       return { brandBrain: { ...state.brandBrain, isApproved: true } }
     })
   },
+
+  extractionError: null,
+  setExtractionError: (err) => set({ extractionError: err }),
 
   promptLibrary: null,
   generatePrompts: () => {

@@ -1332,8 +1332,11 @@ function ExportsPage({ step, setStep, hasBrain, brain }) {
     const a = document.createElement("a");
     a.href = url;
     a.download = `${brain.project.companyName.toLowerCase().replace(/\s+/g, "-")}-${tab}.md`;
+    a.style.display = "none";
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
   }
 
   return (

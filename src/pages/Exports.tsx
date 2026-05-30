@@ -72,8 +72,11 @@ export function Exports() {
     const a = document.createElement('a')
     a.href = url
     a.download = `${names[activeTab]}.${ext}`
+    a.style.display = 'none'
+    document.body.appendChild(a)
     a.click()
-    URL.revokeObjectURL(url)
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 100)
   }
 
   return (
