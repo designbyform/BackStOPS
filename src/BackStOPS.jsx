@@ -7,15 +7,15 @@ const fmt = s => { if(!s) return "—"; const x=new Date(s+"T12:00:00"); return 
 const fmtShort = s => { if(!s) return "—"; const x=new Date(s+"T12:00:00"); return x.toLocaleDateString("en-US",{month:"short",day:"numeric"}); };
 const daysBetween = s => Math.round((new Date(s) - TODAY) / 86400000);
 
-// ── DATA ──────────────────────────────────────────────────────────────────────
+// ── INITIAL DATA ──────────────────────────────────────────────────────────────
 
-const BIZS = [
+const INIT_BIZS = [
   { id:"b1", name:"Light Sleeper Wine Bar",  type:"Wine Bar",      city:"Washington", state:"DC", contact:"Sarah Chen",   email:"sarah@lightsleeper.com" },
   { id:"b2", name:"Kily Import",              type:"Wine Importer", city:"Washington", state:"DC", contact:"Marcus Wright", email:"marcus@kilyimport.com" },
   { id:"b3", name:"Capitol Hill Food Truck",  type:"Food Truck",    city:"Washington", state:"DC", contact:"Priya Patel",   email:"priya@capitolhilltruck.com" },
 ];
 
-const ITEMS = [
+const INIT_ITEMS = [
   { id:"1",  biz:"b1", title:"City Business License Renewal",       cat:"Business License",      status:"In Progress", pri:"Critical", due:d(-15), reqDoc:true,  docStatus:"missing",   freq:"Annual" },
   { id:"2",  biz:"b1", title:"ABRA Retailer Liquor License",        cat:"Alcohol License",       status:"In Progress", pri:"Critical", due:d(11),  reqDoc:true,  docStatus:"uploaded",  freq:"Annual" },
   { id:"3",  biz:"b1", title:"Liquor Liability Insurance Cert",     cat:"Insurance",             status:"In Progress", pri:"Critical", due:d(16),  reqDoc:true,  docStatus:"missing",   freq:"Annual" },
@@ -40,18 +40,33 @@ const ITEMS = [
   { id:"22", biz:"b3", title:"Q2 Sales Tax Filing",                 cat:"Tax / Excise",          status:"Not Started", pri:"Medium",   due:d(31),  reqDoc:false, docStatus:"n/a",       freq:"Quarterly" },
 ];
 
+const TMPLS = [
+  {id:"restaurant",  name:"Restaurant",      icon:"🍽️", items:["City Business License Renewal","Health Dept Food Service Permit","Food Handler Cards — All Staff","General Liability Insurance","Workers' Compensation Insurance","Fire Suppression Inspection","Required Labor Law Postings","Quarterly Payroll Tax (941)","Annual Corporate Report","Grease Trap Service Record"]},
+  {id:"winebar",     name:"Wine Bar",         icon:"🍷",  items:["ABRA Retailer Liquor License Renewal","City Business License","Liquor Liability Insurance","Health Dept Food Service Permit","Food Handler Cards","BMI / ASCAP Music License","Required Labor Law Postings","Workers' Compensation","Quarterly Payroll Tax","Annual Corporate Report"]},
+  {id:"wineimporter",name:"Wine Importer",    icon:"📦",  items:["TTB Basic Importer Permit","FDA Food Facility Registration","Federal Excise Tax Return (Q2)","Federal Excise Tax Return (Q4)","State Importer License","General Liability Insurance","Workers' Compensation","Product Label (COLA) Tracking","Annual Corporate Report"]},
+  {id:"foodtruck",   name:"Food Truck",       icon:"🚚",  items:["Mobile Food Unit Permit — Annual","City Vending Permit (Public Space)","Health Dept Mobile Inspection","Commissary Agreement","General Liability Insurance","Vehicle / Commercial Auto Insurance","Fire Suppression System","Food Handler Cards","Quarterly Sales Tax Filing"]},
+  {id:"salon",       name:"Salon",            icon:"✂️",  items:["Cosmetology Establishment License","Practitioner License Renewals","General Liability Insurance","Workers' Compensation","Health Dept Inspection","Required Labor Law Postings","Annual Corporate Report"]},
+  {id:"contractor",  name:"Contractor",       icon:"🔨",  items:["Contractor License Renewal","Contractor Bond Renewal","Workers' Compensation Insurance","General Liability / E&O Insurance","Commercial Vehicle Registration","Required Labor Law Postings","Annual Corporate Report"]},
+  {id:"winedist",    name:"Wine Distributor", icon:"🏭",  items:["State Wholesale Distributor License","Federal Excise Tax Return (Q2)","Federal Excise Tax Return (Q4)","General Liability Insurance","Workers' Compensation","Annual Corporate Report"]},
+];
+
+const BIZ_TYPES = ["Restaurant","Wine Bar","Wine Importer","Wine Distributor","Food Truck","Salon","Contractor"];
+const BIZ_TYPE_TMPL = {
+  "Restaurant":"restaurant","Wine Bar":"winebar","Wine Importer":"wineimporter",
+  "Wine Distributor":"winedist","Food Truck":"foodtruck","Salon":"salon","Contractor":"contractor",
+};
+
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
 const isOverdue  = i => i.status!=="Completed" && i.status!=="Not Applicable" && new Date(i.due) < TODAY;
 const isDueSoon  = (i,n=30) => { if(i.status==="Completed") return false; const due=new Date(i.due),th=new Date(TODAY); th.setDate(th.getDate()+n); return due>=TODAY && due<=th; };
 const effSt      = i => { if(i.status==="Completed") return "Completed"; if(isOverdue(i)) return "Overdue"; if(isDueSoon(i,7)) return "Due Soon"; return i.status; };
-const bizById    = id => BIZS.find(b=>b.id===id);
 
-const healthScore = () => {
-  const ov  = ITEMS.filter(isOverdue).length;
-  const exp = ITEMS.filter(i=>i.reqDoc&&i.docStatus==="expired").length;
-  const mis = ITEMS.filter(i=>i.reqDoc&&i.docStatus==="missing").length;
-  const d7  = ITEMS.filter(i=>isDueSoon(i,7)).length;
+const healthScore = items => {
+  const ov  = items.filter(isOverdue).length;
+  const exp = items.filter(i=>i.reqDoc&&i.docStatus==="expired").length;
+  const mis = items.filter(i=>i.reqDoc&&i.docStatus==="missing").length;
+  const d7  = items.filter(i=>isDueSoon(i,7)).length;
   return Math.max(0, Math.min(100, 100 - ov*8 - exp*5 - mis*4 - d7*2));
 };
 
@@ -71,6 +86,35 @@ const actionBtnLabel = item => {
   if (item.status==="Waiting on Client") return "Send Reminder";
   if (item.status==="In Progress") return "Review";
   return "Mark Complete";
+};
+
+const deriveItem = (title, bizId, idx) => {
+  const t = title.toLowerCase();
+  const reqDoc = /insurance|license|permit|certificate|card|registration|agreement|bond/.test(t);
+  const cat = t.includes("insurance") ? "Insurance"
+    : t.includes("abra")||t.includes("liquor") ? "Alcohol License"
+    : t.includes("ttb") ? "TTB / Alcohol Federal"
+    : t.includes("fda") ? "FDA / Federal"
+    : t.includes("license")||t.includes("corporate") ? "Business License"
+    : t.includes("permit")||t.includes("inspection") ? "Health Permit"
+    : t.includes("tax")||t.includes("excise")||t.includes("payroll") ? "Tax / Excise"
+    : t.includes("posting") ? "Required Posting"
+    : t.includes("fire") ? "Fire / Safety"
+    : t.includes("vehicle") ? "Other"
+    : "Other";
+  const pri = t.includes("license")||t.includes("insurance")||t.includes("permit") ? "High" : "Medium";
+  return {
+    id: `n${Date.now()}-${bizId}-${idx}`,
+    biz: bizId,
+    title,
+    cat,
+    status: "Not Started",
+    pri,
+    due: d(90),
+    reqDoc,
+    docStatus: reqDoc ? "missing" : "n/a",
+    freq: "Annual",
+  };
 };
 
 // ── DESIGN TOKENS ─────────────────────────────────────────────────────────────
@@ -149,20 +193,31 @@ function Sidebar({view, setView}) {
 
 // ── DASHBOARD / ACTION CENTER ─────────────────────────────────────────────────
 
-function Dashboard({setView, setItem}) {
+function Dashboard({bizs, items, setView, setItem}) {
   const [toast, setToast] = useState(null);
 
-  const score      = healthScore();
+  if (bizs.length === 0) {
+    return (
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"60vh",gap:16,textAlign:"center"}}>
+        <div style={{width:64,height:64,background:"#eff6ff",borderRadius:20,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28}}>⊞</div>
+        <div style={{fontFamily:F,fontSize:20,fontWeight:800,color:"#1a2332"}}>No businesses yet</div>
+        <div style={{fontFamily:F,fontSize:14,color:"#64748b",maxWidth:340,lineHeight:1.6}}>Add your first business to generate a compliance system and start tracking permits, licenses, and deadlines.</div>
+        <Btn primary onClick={()=>setView("addBusiness")} style={{marginTop:8,padding:"10px 22px",fontSize:14}}>+ Add your first business</Btn>
+      </div>
+    );
+  }
+
+  const score      = healthScore(items);
   const scoreLabel = score>=90 ? "Healthy" : score>=70 ? "Needs Attention" : "At Risk";
   const scoreColor = score>=90 ? "#15803d" : score>=70 ? "#b45309" : "#b91c1c";
   const scoreBg    = score>=90 ? "#f0fdf4" : score>=70 ? "#fffbeb" : "#fef2f2";
   const scoreBd    = score>=90 ? "#bbf7d0" : score>=70 ? "#fde68a" : "#fecaca";
 
-  const overdue = ITEMS.filter(isOverdue);
-  const due7    = ITEMS.filter(i=>isDueSoon(i,7));
-  const badDocs = ITEMS.filter(i=>i.reqDoc&&(i.docStatus==="missing"||i.docStatus==="expired"));
+  const overdue = items.filter(isOverdue);
+  const due7    = items.filter(i=>isDueSoon(i,7));
+  const badDocs = items.filter(i=>i.reqDoc&&(i.docStatus==="missing"||i.docStatus==="expired"));
 
-  const actionItems = [...ITEMS]
+  const actionItems = [...items]
     .filter(i => i.status!=="Completed" && i.status!=="Not Applicable")
     .filter(i => isOverdue(i) || isDueSoon(i,7) || (i.reqDoc && i.docStatus!=="uploaded" && i.docStatus!=="n/a"))
     .sort((a,b) => {
@@ -173,8 +228,8 @@ function Dashboard({setView, setItem}) {
     })
     .slice(0, 12);
 
-  const bizOverview = BIZS.map(biz => {
-    const its      = ITEMS.filter(i=>i.biz===biz.id&&i.status!=="Completed");
+  const bizOverview = bizs.map(biz => {
+    const its      = items.filter(i=>i.biz===biz.id&&i.status!=="Completed");
     const ovCount  = its.filter(isOverdue).length;
     const docCount = its.filter(i=>i.reqDoc&&(i.docStatus==="missing"||i.docStatus==="expired")).length;
     const next     = [...its].sort((a,b)=>new Date(a.due)-new Date(b.due))[0];
@@ -188,12 +243,14 @@ function Dashboard({setView, setItem}) {
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div>
           <div style={{fontFamily:F,fontSize:22,fontWeight:900,color:"#1a2332"}}>Action Center</div>
-          <div style={{fontFamily:F,fontSize:12,color:"#94a3b8",marginTop:2}}>May 30, 2026 · 3 businesses</div>
+          <div style={{fontFamily:F,fontSize:12,color:"#94a3b8",marginTop:2}}>May 30, 2026 · {bizs.length} {bizs.length===1?"business":"businesses"}</div>
         </div>
-        <Btn small>+ Add Item</Btn>
+        <div style={{display:"flex",gap:8}}>
+          <Btn small onClick={()=>setView("addBusiness")}>+ Add Business</Btn>
+          <Btn small>+ Add Item</Btn>
+        </div>
       </div>
 
-      {/* Health score + stats */}
       <div style={{display:"flex",gap:12,alignItems:"stretch"}}>
         <div style={{background:scoreBg,border:`1px solid ${scoreBd}`,borderRadius:14,padding:"16px 22px",minWidth:200,flexShrink:0}}>
           <Lbl>Compliance Health</Lbl>
@@ -218,7 +275,6 @@ function Dashboard({setView, setItem}) {
         ))}
       </div>
 
-      {/* Action Queue */}
       <div>
         <div style={{fontFamily:F,fontSize:13,fontWeight:700,color:"#1a2332",marginBottom:10}}>
           Action Queue
@@ -233,7 +289,7 @@ function Dashboard({setView, setItem}) {
             const days    = daysBetween(item.due);
             const verb    = taskVerb(item);
             const btn     = actionBtnLabel(item);
-            const biz     = bizById(item.biz);
+            const biz     = bizs.find(b=>b.id===item.biz);
             const isLast  = idx===actionItems.length-1;
             const notable = ov || item.status==="Waiting on Client" || item.status==="In Progress";
             return (
@@ -257,7 +313,6 @@ function Dashboard({setView, setItem}) {
         </Card>
       </div>
 
-      {/* Business Overview */}
       <div>
         <div style={{fontFamily:F,fontSize:13,fontWeight:700,color:"#1a2332",marginBottom:10}}>Businesses</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
@@ -289,15 +344,15 @@ function Dashboard({setView, setItem}) {
   );
 }
 
-// ── COMPLIANCE LIST (not in nav — accessed via businesses / detail) ────────────
+// ── COMPLIANCE LIST ────────────────────────────────────────────────────────────
 
-function ComplianceList({setItem, setView, bizFilter}) {
+function ComplianceList({bizs, items, setItem, setView, bizFilter}) {
   const [search, setSearch] = useState("");
   const [st,     setSt]     = useState("all");
   const [pri,    setPri]    = useState("all");
   const [biz,    setBiz]    = useState(bizFilter||"all");
 
-  const rows = ITEMS.filter(i=>{
+  const rows = items.filter(i=>{
     if(biz!=="all"&&i.biz!==biz) return false;
     if(st!=="all"&&effSt(i)!==st) return false;
     if(pri!=="all"&&i.pri!==pri) return false;
@@ -316,7 +371,7 @@ function ComplianceList({setItem, setView, bizFilter}) {
         <div>
           <button onClick={()=>setView("businesses")} style={{fontFamily:F,background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:13,padding:0,marginBottom:6,display:"flex",alignItems:"center",gap:4}}>← Businesses</button>
           <div style={{fontFamily:F,fontSize:22,fontWeight:900,color:"#1a2332"}}>Compliance Items</div>
-          <div style={{fontFamily:F,fontSize:13,color:"#94a3b8"}}>{rows.length} of {ITEMS.length} items</div>
+          <div style={{fontFamily:F,fontSize:13,color:"#94a3b8"}}>{rows.length} of {items.length} items</div>
         </div>
         <Btn primary small>+ Add Item</Btn>
       </div>
@@ -325,7 +380,7 @@ function ComplianceList({setItem, setView, bizFilter}) {
           <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…" style={{flex:"2 1 140px"}}/>
           <Select value={biz} onChange={e=>setBiz(e.target.value)} style={{flex:"1 1 120px"}}>
             <option value="all">All Businesses</option>
-            {BIZS.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+            {bizs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
           </Select>
           <Select value={st} onChange={e=>setSt(e.target.value)} style={{flex:"1 1 110px"}}>
             <option value="all">All Statuses</option>
@@ -355,7 +410,7 @@ function ComplianceList({setItem, setView, bizFilter}) {
                     <div style={{fontFamily:F,fontSize:13,fontWeight:600,color:"#1a2332"}}>{item.title}</div>
                     {item.reqDoc&&item.docStatus==="missing"&&<div style={{fontFamily:F,fontSize:10,color:"#f97316",marginTop:1}}>⚠ Missing document</div>}
                   </td>
-                  <td style={{padding:"10px 14px",fontFamily:F,fontSize:12,color:"#475569"}}>{bizById(item.biz)?.name}</td>
+                  <td style={{padding:"10px 14px",fontFamily:F,fontSize:12,color:"#475569"}}>{bizs.find(b=>b.id===item.biz)?.name}</td>
                   <td style={{padding:"10px 14px",fontFamily:F,fontSize:11,color:"#64748b"}}>{item.cat}</td>
                   <td style={{padding:"10px 14px",fontFamily:F,fontSize:12,fontWeight:ov?700:400,color:ov?"#dc2626":"#475569"}}>{fmt(item.due)}</td>
                   <td style={{padding:"10px 14px"}}><Pill st={effSt(item)}/></td>
@@ -372,9 +427,9 @@ function ComplianceList({setItem, setView, bizFilter}) {
 
 // ── DETAIL ────────────────────────────────────────────────────────────────────
 
-function Detail({item, setView, backView="dashboard"}) {
+function Detail({bizs, item, setView, backView="dashboard"}) {
   const [done, setDone] = useState(item.status==="Completed");
-  const biz  = bizById(item.biz);
+  const biz  = bizs.find(b=>b.id===item.biz);
   const days = daysBetween(item.due);
   const ov   = isOverdue(item);
   const docS = DS[item.docStatus]??DS["n/a"];
@@ -487,19 +542,27 @@ function Detail({item, setView, backView="dashboard"}) {
 
 // ── BUSINESSES ────────────────────────────────────────────────────────────────
 
-function Businesses({setView, setBizFilter}) {
+function Businesses({bizs, items, setView, setBizFilter}) {
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div>
           <div style={{fontFamily:F,fontSize:22,fontWeight:900,color:"#1a2332"}}>Businesses</div>
-          <div style={{fontFamily:F,fontSize:13,color:"#94a3b8"}}>{BIZS.length} businesses under management</div>
+          <div style={{fontFamily:F,fontSize:13,color:"#94a3b8"}}>{bizs.length} {bizs.length===1?"business":"businesses"} under management</div>
         </div>
-        <Btn primary small>+ Add Business</Btn>
+        <Btn primary small onClick={()=>setView("addBusiness")}>+ Add Business</Btn>
       </div>
+      {bizs.length===0&&(
+        <div style={{textAlign:"center",padding:"48px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
+          <div style={{fontSize:36}}>⊞</div>
+          <div style={{fontFamily:F,fontSize:15,fontWeight:700,color:"#1a2332"}}>No businesses yet</div>
+          <div style={{fontFamily:F,fontSize:13,color:"#64748b",maxWidth:320}}>Add your first business to generate a compliance system.</div>
+          <Btn primary onClick={()=>setView("addBusiness")} style={{marginTop:4}}>+ Add your first business</Btn>
+        </div>
+      )}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14}}>
-        {BIZS.map(biz=>{
-          const its  = ITEMS.filter(i=>i.biz===biz.id);
+        {bizs.map(biz=>{
+          const its  = items.filter(i=>i.biz===biz.id);
           const ov   = its.filter(isOverdue).length;
           const d30  = its.filter(i=>isDueSoon(i,30)).length;
           const docs = its.filter(i=>i.reqDoc&&(i.docStatus==="missing"||i.docStatus==="expired")).length;
@@ -535,14 +598,14 @@ function Businesses({setView, setBizFilter}) {
 
 // ── CALENDAR ──────────────────────────────────────────────────────────────────
 
-function Calendar() {
+function Calendar({bizs, items}) {
   const [mode, setMode] = useState("month");
   const [biz,  setBiz]  = useState("all");
   const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
   const cells = [null];
   for(let i=1;i<=30;i++) cells.push(i);
   while(cells.length%7!==0) cells.push(null);
-  const filtered = ITEMS.filter(i=>(biz==="all"||i.biz===biz)&&i.status!=="Completed");
+  const filtered = items.filter(i=>(biz==="all"||i.biz===biz)&&i.status!=="Completed");
   const getDay   = day => { if(!day) return []; const iso=`2026-06-${String(day).padStart(2,"0")}`; return filtered.filter(i=>i.due===iso); };
   const upcoming = [...filtered].sort((a,b)=>new Date(a.due)-new Date(b.due)).slice(0,14);
   return (
@@ -555,7 +618,7 @@ function Calendar() {
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
           <Select value={biz} onChange={e=>setBiz(e.target.value)}>
             <option value="all">All Businesses</option>
-            {BIZS.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+            {bizs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
           </Select>
           <div style={{display:"flex",background:"#f1f5f9",borderRadius:8,padding:2,gap:2}}>
             {["month","list"].map(m=>(
@@ -601,7 +664,7 @@ function Calendar() {
                 </div>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontFamily:F,fontSize:13,fontWeight:600,color:"#1a2332",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.title}</div>
-                  <div style={{fontFamily:F,fontSize:11,color:"#94a3b8",marginTop:1}}>{bizById(item.biz)?.name}</div>
+                  <div style={{fontFamily:F,fontSize:11,color:"#94a3b8",marginTop:1}}>{bizs.find(b=>b.id===item.biz)?.name}</div>
                 </div>
                 <Pill st={effSt(item)}/>
                 <div style={{fontFamily:F,fontSize:11,fontWeight:600,color:ov?"#dc2626":days<=7?"#d97706":"#94a3b8",minWidth:70,textAlign:"right"}}>
@@ -618,10 +681,10 @@ function Calendar() {
 
 // ── DOCUMENTS ─────────────────────────────────────────────────────────────────
 
-function Documents() {
+function Documents({bizs, items}) {
   const [filter, setFilter] = useState("all");
   const [biz,    setBiz]    = useState("all");
-  const docItems = ITEMS.filter(i=>i.reqDoc);
+  const docItems = items.filter(i=>i.reqDoc);
   const counts = {
     all:     docItems.length,
     missing: docItems.filter(i=>i.docStatus==="missing").length,
@@ -638,7 +701,7 @@ function Documents() {
         </div>
         <Select value={biz} onChange={e=>setBiz(e.target.value)}>
           <option value="all">All Businesses</option>
-          {BIZS.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+          {bizs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
         </Select>
       </div>
       <div style={{display:"flex",gap:10}}>
@@ -673,7 +736,7 @@ function Documents() {
                     <div style={{fontFamily:F,fontSize:13,fontWeight:600,color:"#1a2332"}}>{item.title}</div>
                     {ov&&<div style={{fontFamily:F,fontSize:10,color:"#dc2626",marginTop:1}}>⚠ Overdue</div>}
                   </td>
-                  <td style={{padding:"10px 14px",fontFamily:F,fontSize:12,color:"#475569"}}>{bizById(item.biz)?.name}</td>
+                  <td style={{padding:"10px 14px",fontFamily:F,fontSize:12,color:"#475569"}}>{bizs.find(b=>b.id===item.biz)?.name}</td>
                   <td style={{padding:"10px 14px",fontFamily:F,fontSize:12,fontWeight:ov?700:400,color:ov?"#dc2626":"#475569"}}>{fmt(item.due)}</td>
                   <td style={{padding:"10px 14px"}}><span style={{fontFamily:F,background:docS.bg,color:docS.tx,borderRadius:999,padding:"2px 8px",fontSize:11,fontWeight:600}}>{docS.label}</span></td>
                   <td style={{padding:"10px 14px"}}>
@@ -826,17 +889,17 @@ function Settings() {
   );
 }
 
-// ── CONCIERGE VIEW (internal — not in primary nav) ────────────────────────────
+// ── CONCIERGE VIEW ────────────────────────────────────────────────────────────
 
-function Admin({setItem, setView}) {
-  const overdue     = ITEMS.filter(isOverdue);
-  const due7        = ITEMS.filter(i=>isDueSoon(i,7));
-  const waitClient  = ITEMS.filter(i=>i.status==="Waiting on Client");
-  const missingDocs = ITEMS.filter(i=>i.reqDoc&&i.docStatus==="missing");
+function Admin({bizs, items, setItem, setView}) {
+  const overdue     = items.filter(isOverdue);
+  const due7        = items.filter(i=>isDueSoon(i,7));
+  const waitClient  = items.filter(i=>i.status==="Waiting on Client");
+  const missingDocs = items.filter(i=>i.reqDoc&&i.docStatus==="missing");
   const [toast, setToast] = useState(null);
   const showToast = msg => { setToast(msg); setTimeout(()=>setToast(null),2200); };
   const ActionRow = ({item}) => {
-    const biz=bizById(item.biz);const ov=isOverdue(item);const days=daysBetween(item.due);
+    const biz=bizs.find(b=>b.id===item.biz);const ov=isOverdue(item);const days=daysBetween(item.due);
     return (
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"9px 14px",borderBottom:"1px solid #f8fafc"}}>
         <div style={{flex:1,minWidth:0}}>
@@ -880,17 +943,200 @@ function Admin({setItem, setView}) {
   );
 }
 
-// ── TEMPLATES (data preserved, not in nav — used by Add Business flow) ────────
+// ── ADD BUSINESS WIZARD ───────────────────────────────────────────────────────
 
-const TMPLS = [
-  {id:"restaurant",  name:"Restaurant",      icon:"🍽️", count:10, desc:"Business license, health permits, insurance, taxes, and required postings.",    items:["City Business License Renewal","Health Dept Food Service Permit","Food Handler Cards — All Staff","General Liability Insurance","Workers' Compensation Insurance","Fire Suppression Inspection","Required Labor Law Postings","Quarterly Payroll Tax (941)","Annual Corporate Report","Grease Trap Service Record"]},
-  {id:"winebar",     name:"Wine Bar",         icon:"🍷",  count:10, desc:"ABRA/liquor board renewals, liquor liability, music licensing.",               items:["ABRA Retailer Liquor License Renewal","City Business License","Liquor Liability Insurance","Health Dept Food Service Permit","Food Handler Cards","BMI / ASCAP Music License","Required Labor Law Postings","Workers' Compensation","Quarterly Payroll Tax","Annual Corporate Report"]},
-  {id:"wineimporter",name:"Wine Importer",    icon:"📦",  count:9,  desc:"TTB Basic Permit, COLA tracking, FDA registration, federal excise tax.",       items:["TTB Basic Importer Permit","FDA Food Facility Registration","Federal Excise Tax Return (Q2)","Federal Excise Tax Return (Q4)","State Importer License","General Liability Insurance","Workers' Compensation","Product Label (COLA) Tracking","Annual Corporate Report"]},
-  {id:"foodtruck",   name:"Food Truck",       icon:"🚚",  count:9,  desc:"Mobile unit permit, commissary agreement, city vending permits.",              items:["Mobile Food Unit Permit — Annual","City Vending Permit (Public Space)","Health Dept Mobile Inspection","Commissary Agreement","General Liability Insurance","Vehicle / Commercial Auto Insurance","Fire Suppression System","Food Handler Cards","Quarterly Sales Tax Filing"]},
-  {id:"salon",       name:"Salon",            icon:"✂️",  count:7,  desc:"Cosmetology licenses, practitioner renewals, liability insurance.",            items:["Cosmetology Establishment License","Practitioner License Renewals","General Liability Insurance","Workers' Compensation","Health Dept Inspection","Required Labor Law Postings","Annual Corporate Report"]},
-  {id:"contractor",  name:"Contractor",       icon:"🔨",  count:7,  desc:"Contractor license, bond, workers comp, vehicle registration.",               items:["Contractor License Renewal","Contractor Bond Renewal","Workers' Compensation Insurance","General Liability / E&O Insurance","Commercial Vehicle Registration","Required Labor Law Postings","Annual Corporate Report"]},
-  {id:"winedist",    name:"Wine Distributor", icon:"🏭",  count:6,  desc:"State distributor license, excise tax, reporting deadlines.",                 items:["State Wholesale Distributor License","Federal Excise Tax Return (Q2)","Federal Excise Tax Return (Q4)","General Liability Insurance","Workers' Compensation","Annual Corporate Report"]},
-];
+function AddBusinessWizard({setBizs, setItems, setView}) {
+  const [step,    setStep]    = useState(1);
+  const [form,    setForm]    = useState({name:"",type:"Restaurant",city:"",state:"",contact:"",email:""});
+  const [list,    setList]    = useState([]);
+  const [custom,  setCustom]  = useState("");
+  const [created, setCreated] = useState(false);
+
+  const tmpl = TMPLS.find(t => t.id === BIZ_TYPE_TMPL[form.type]);
+
+  const goStep2 = () => {
+    setList(tmpl ? tmpl.items.map(title => ({title, kept:true})) : []);
+    setStep(2);
+  };
+
+  const addCustom = () => {
+    const v = custom.trim();
+    if (!v) return;
+    setList(prev => [...prev, {title:v, kept:true, custom:true}]);
+    setCustom("");
+  };
+
+  const create = () => {
+    const bizId = `b${Date.now()}`;
+    const newBiz = {...form, id: bizId};
+    const newItems = list.filter(c=>c.kept).map((c,idx) => deriveItem(c.title, bizId, idx));
+    setBizs(prev => [...prev, newBiz]);
+    setItems(prev => [...prev, ...newItems]);
+    setCreated(true);
+    setTimeout(() => setView("businesses"), 900);
+  };
+
+  const step1Valid = form.name.trim() && form.city.trim() && form.state.trim() && form.contact.trim();
+  const keptCount  = list.filter(c=>c.kept).length;
+  const docCount   = list.filter(c=>c.kept && /insurance|license|permit|certificate|card|registration|agreement|bond/.test(c.title.toLowerCase())).length;
+
+  const StepBar = () => (
+    <div style={{display:"flex",alignItems:"center",gap:0,marginBottom:24}}>
+      {[1,2,3].map((n,i)=>(
+        <div key={n} style={{display:"flex",alignItems:"center",flex:i<2?1:"auto"}}>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+            <div style={{width:28,height:28,borderRadius:"50%",background:step>=n?"#2563eb":"#e2e8f0",color:step>=n?"#fff":"#94a3b8",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:F,fontSize:12,fontWeight:700,flexShrink:0}}>{step>n?"✓":n}</div>
+            <div style={{fontFamily:F,fontSize:10,fontWeight:600,color:step>=n?"#2563eb":"#94a3b8",whiteSpace:"nowrap"}}>{n===1?"Business Basics":n===2?"Compliance Checklist":"Review & Create"}</div>
+          </div>
+          {i<2&&<div style={{flex:1,height:2,background:step>n?"#2563eb":"#e2e8f0",margin:"0 8px",marginBottom:16}}/>}
+        </div>
+      ))}
+    </div>
+  );
+
+  if (created) {
+    return (
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"60vh",gap:14,textAlign:"center"}}>
+        <div style={{width:60,height:60,background:"#f0fdf4",border:"2px solid #bbf7d0",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26}}>✓</div>
+        <div style={{fontFamily:F,fontSize:18,fontWeight:800,color:"#1a2332"}}>Compliance system created!</div>
+        <div style={{fontFamily:F,fontSize:13,color:"#64748b"}}>{form.name} · {keptCount} items generated</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{maxWidth:620,margin:"0 auto"}}>
+      <div style={{marginBottom:20}}>
+        <button onClick={()=>step===1?setView("businesses"):setStep(s=>s-1)} style={{fontFamily:F,background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:13,padding:0,display:"flex",alignItems:"center",gap:4}}>← {step===1?"Businesses":"Back"}</button>
+        <div style={{fontFamily:F,fontSize:22,fontWeight:900,color:"#1a2332",marginTop:8}}>Add Business</div>
+      </div>
+
+      <StepBar/>
+
+      {step===1&&(
+        <Card>
+          <CardHd>Business Basics</CardHd>
+          <div style={{padding:"20px 20px",display:"flex",flexDirection:"column",gap:16}}>
+            <div>
+              <Lbl style={{display:"block",marginBottom:6}}>Business Name</Lbl>
+              <Input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Light Sleeper Wine Bar" style={{width:"100%",boxSizing:"border-box"}}/>
+            </div>
+            <div>
+              <Lbl style={{display:"block",marginBottom:6}}>Business Type</Lbl>
+              <Select value={form.type} onChange={e=>setForm(p=>({...p,type:e.target.value}))} style={{width:"100%"}}>
+                {BIZ_TYPES.map(t=><option key={t}>{t}</option>)}
+              </Select>
+              {tmpl&&<div style={{fontFamily:F,fontSize:11,color:"#64748b",marginTop:6}}>We'll suggest {tmpl.items.length} compliance items for a {form.type}.</div>}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div>
+                <Lbl style={{display:"block",marginBottom:6}}>City</Lbl>
+                <Input value={form.city} onChange={e=>setForm(p=>({...p,city:e.target.value}))} placeholder="Washington" style={{width:"100%",boxSizing:"border-box"}}/>
+              </div>
+              <div>
+                <Lbl style={{display:"block",marginBottom:6}}>State</Lbl>
+                <Input value={form.state} onChange={e=>setForm(p=>({...p,state:e.target.value}))} placeholder="DC" style={{width:"100%",boxSizing:"border-box"}}/>
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div>
+                <Lbl style={{display:"block",marginBottom:6}}>Contact Name</Lbl>
+                <Input value={form.contact} onChange={e=>setForm(p=>({...p,contact:e.target.value}))} placeholder="Sarah Chen" style={{width:"100%",boxSizing:"border-box"}}/>
+              </div>
+              <div>
+                <Lbl style={{display:"block",marginBottom:6}}>Email</Lbl>
+                <Input value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))} placeholder="sarah@example.com" style={{width:"100%",boxSizing:"border-box"}}/>
+              </div>
+            </div>
+            <div style={{paddingTop:8,borderTop:"1px solid #f1f5f9",display:"flex",justifyContent:"flex-end"}}>
+              <Btn primary onClick={goStep2} style={{opacity:step1Valid?1:.5,cursor:step1Valid?"pointer":"default"}}>Continue →</Btn>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {step===2&&(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <Card>
+            <div style={{padding:"16px 20px 12px"}}>
+              <div style={{fontFamily:F,fontSize:14,fontWeight:700,color:"#1a2332",marginBottom:4}}>
+                {tmpl?.icon} Suggested items for {form.type}
+              </div>
+              <div style={{fontFamily:F,fontSize:12,color:"#64748b"}}>Keep what applies, remove what doesn't. You can always add or remove items later.</div>
+            </div>
+            <div style={{borderTop:"1px solid #f1f5f9"}}>
+              {list.map((row,idx)=>(
+                <div key={idx} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 20px",borderBottom:"1px solid #f8fafc",background:row.kept?"#fff":"#f8fafc",opacity:row.kept?1:.5}}>
+                  <div style={{width:3,height:28,borderRadius:99,background:row.kept?"#2563eb":"#d1d5db",flexShrink:0}}/>
+                  <div style={{flex:1,fontFamily:F,fontSize:13,fontWeight:500,color:row.kept?"#1a2332":"#94a3b8"}}>{row.title}</div>
+                  {row.custom&&<span style={{fontFamily:F,fontSize:10,fontWeight:600,color:"#7c3aed",background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:999,padding:"1px 7px"}}>Custom</span>}
+                  <button onClick={()=>setList(prev=>prev.map((r,i)=>i===idx?{...r,kept:!r.kept}:r))} style={{fontFamily:F,fontSize:11,fontWeight:600,cursor:"pointer",padding:"4px 10px",borderRadius:6,background:row.kept?"#fef2f2":"#f0fdf4",color:row.kept?"#b91c1c":"#15803d",border:row.kept?"1px solid #fecaca":"1px solid #bbf7d0",flexShrink:0}}>
+                    {row.kept?"Remove":"Keep"}
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div style={{padding:"12px 20px",borderTop:"1px solid #f1f5f9",display:"flex",gap:8}}>
+              <Input value={custom} onChange={e=>setCustom(e.target.value)} placeholder="Add a custom item…" onKeyDown={e=>e.key==="Enter"&&addCustom()} style={{flex:1}}/>
+              <Btn small onClick={addCustom}>+ Add</Btn>
+            </div>
+          </Card>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0 2px"}}>
+            <div style={{fontFamily:F,fontSize:12,color:"#64748b"}}>{keptCount} of {list.length} items selected</div>
+            <Btn primary onClick={()=>setStep(3)}>Review & Create →</Btn>
+          </div>
+        </div>
+      )}
+
+      {step===3&&(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <Card>
+            <CardHd>Business Summary</CardHd>
+            <div style={{padding:"16px 20px",display:"flex",flexDirection:"column",gap:8}}>
+              {[
+                ["Business Name", form.name],
+                ["Type",          form.type],
+                ["Location",      `${form.city}, ${form.state}`],
+                ["Contact",       `${form.contact}${form.email?" · "+form.email:""}`],
+              ].map(([label,val])=>(
+                <div key={label} style={{display:"flex",gap:16}}>
+                  <dt style={{width:130,flexShrink:0,fontFamily:F,fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:".06em",color:"#94a3b8"}}>{label}</dt>
+                  <dd style={{fontFamily:F,fontSize:13,color:"#1a2332",margin:0}}>{val||"—"}</dd>
+                </div>
+              ))}
+            </div>
+          </Card>
+          <Card>
+            <CardHd>Compliance System</CardHd>
+            <div style={{padding:"16px 20px",display:"flex",flexDirection:"column",gap:10}}>
+              <div style={{display:"flex",gap:20}}>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontFamily:F,fontSize:32,fontWeight:900,color:"#2563eb",lineHeight:1}}>{keptCount}</div>
+                  <div style={{fontFamily:F,fontSize:11,color:"#94a3b8",marginTop:2}}>Compliance items</div>
+                </div>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontFamily:F,fontSize:32,fontWeight:900,color:"#ea580c",lineHeight:1}}>{docCount}</div>
+                  <div style={{fontFamily:F,fontSize:11,color:"#94a3b8",marginTop:2}}>Require documents</div>
+                </div>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontFamily:F,fontSize:32,fontWeight:900,color:"#64748b",lineHeight:1}}>{fmt(d(90))}</div>
+                  <div style={{fontFamily:F,fontSize:11,color:"#94a3b8",marginTop:2}}>First deadlines set</div>
+                </div>
+              </div>
+              <div style={{background:"#f8fafc",border:"1px solid #e8ecf0",borderRadius:8,padding:"10px 14px",fontFamily:F,fontSize:12,color:"#64748b",lineHeight:1.6}}>
+                Initial deadlines are set to 90 days from today. You can adjust individual deadlines after setup.
+              </div>
+            </div>
+          </Card>
+          <div style={{display:"flex",gap:10,justifyContent:"flex-end",padding:"4px 2px"}}>
+            <Btn onClick={()=>setStep(2)}>← Back</Btn>
+            <button onClick={create} style={{fontFamily:F,background:"#2563eb",color:"#fff",border:"none",borderRadius:8,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer"}}>Create Compliance System</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── LANDING ───────────────────────────────────────────────────────────────────
 
@@ -971,6 +1217,8 @@ export default function BackStOPSApp() {
   const [view,      setView]      = useState("landing");
   const [item,      setItem]      = useState(null);
   const [bizFilter, setBizFilter] = useState("all");
+  const [bizs,      setBizs]      = useState(INIT_BIZS);
+  const [items,     setItems]     = useState(INIT_ITEMS);
 
   const nav = v => { setView(v); if(v!=="detail"&&v!=="compliance") setItem(null); };
 
@@ -982,14 +1230,15 @@ export default function BackStOPSApp() {
     <div style={{fontFamily:F,display:"flex",height:"100vh",overflow:"hidden",background:"#f1f5f9"}}>
       <Sidebar view={view} setView={nav}/>
       <main style={{flex:1,overflowY:"auto",padding:"28px 32px"}}>
-        {view==="dashboard"  && <Dashboard setView={nav} setItem={setItem}/>}
-        {view==="businesses" && <Businesses setView={nav} setBizFilter={setBizFilter}/>}
-        {view==="compliance" && <ComplianceList setItem={setItem} setView={nav} bizFilter={bizFilter}/>}
-        {view==="detail"     && item && <Detail item={item} setView={nav} backView="dashboard"/>}
-        {view==="calendar"   && <Calendar/>}
-        {view==="documents"  && <Documents/>}
-        {view==="settings"   && <Settings/>}
-        {view==="admin"      && <Admin setItem={setItem} setView={nav}/>}
+        {view==="dashboard"   && <Dashboard   bizs={bizs} items={items} setView={nav} setItem={setItem}/>}
+        {view==="businesses"  && <Businesses  bizs={bizs} items={items} setView={nav} setBizFilter={setBizFilter}/>}
+        {view==="compliance"  && <ComplianceList bizs={bizs} items={items} setItem={setItem} setView={nav} bizFilter={bizFilter}/>}
+        {view==="detail"      && item && <Detail bizs={bizs} item={item} setView={nav} backView="dashboard"/>}
+        {view==="calendar"    && <Calendar    bizs={bizs} items={items}/>}
+        {view==="documents"   && <Documents   bizs={bizs} items={items}/>}
+        {view==="settings"    && <Settings/>}
+        {view==="admin"       && <Admin       bizs={bizs} items={items} setItem={setItem} setView={nav}/>}
+        {view==="addBusiness" && <AddBusinessWizard setBizs={setBizs} setItems={setItems} setView={nav}/>}
       </main>
     </div>
   );
