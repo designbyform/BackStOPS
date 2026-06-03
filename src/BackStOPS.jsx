@@ -55,6 +55,11 @@ const BIZ_TYPE_TMPL = {
   "Restaurant":"restaurant","Wine Bar":"winebar","Wine Importer":"wineimporter",
   "Wine Distributor":"winedist","Food Truck":"foodtruck","Salon":"salon","Contractor":"contractor",
 };
+const DOC_TYPES = ["Business License","Liquor License","Insurance Certificate","Workers' Compensation","Health Permit","TTB Permit","FDA Registration","Tax Filing","Other"];
+const CAT_TO_DOC = {
+  "Insurance":"Insurance Certificate","Alcohol License":"Liquor License","TTB / Alcohol Federal":"TTB Permit",
+  "Health Permit":"Health Permit","Business License":"Business License","FDA / Federal":"FDA Registration","Tax / Excise":"Tax Filing",
+};
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -193,7 +198,7 @@ function Sidebar({view, setView}) {
 
 // ── DASHBOARD / ACTION CENTER ─────────────────────────────────────────────────
 
-function Dashboard({bizs, items, setView, setItem}) {
+function Dashboard({bizs, items, setView, setItem, navUpload}) {
   const [toast, setToast] = useState(null);
 
   if (bizs.length === 0) {
@@ -306,12 +311,48 @@ function Dashboard({bizs, items, setView, setItem}) {
                   </div>
                 </div>
                 {notable&&<Pill st={ov?"Overdue":item.status==="Waiting on Client"?"Waiting on Client":"In Progress"}/>}
-                <button onClick={()=>{setItem(item);setView("detail");}} style={{fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer",padding:"6px 13px",borderRadius:8,whiteSpace:"nowrap",flexShrink:0,background:btn==="Upload"?"#2563eb":btn==="Send Reminder"?"#f59e0b":"#f8fafc",color:btn==="Upload"||btn==="Send Reminder"?"#fff":"#374151",border:btn==="Upload"||btn==="Send Reminder"?"none":"1px solid #e2e8f0"}}>{btn}</button>
+                <button onClick={()=>{ if(btn==="Upload") navUpload({itemId:item.id,bizId:item.biz}); else {setItem(item);setView("detail");} }} style={{fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer",padding:"6px 13px",borderRadius:8,whiteSpace:"nowrap",flexShrink:0,background:btn==="Upload"?"#2563eb":btn==="Send Reminder"?"#f59e0b":"#f8fafc",color:btn==="Upload"||btn==="Send Reminder"?"#fff":"#374151",border:btn==="Upload"||btn==="Send Reminder"?"none":"1px solid #e2e8f0"}}>{btn}</button>
               </div>
             );
           })}
         </Card>
       </div>
+
+      {/* Coverage Gaps */}
+      {(() => {
+        const gaps = bizs.flatMap(biz =>
+          items.filter(i => i.biz===biz.id && i.reqDoc && i.docStatus!=="uploaded" && i.status!=="Completed" && i.status!=="Not Applicable")
+               .map(i => ({biz, item:i}))
+        ).slice(0,6);
+        return (
+          <div>
+            <div style={{fontFamily:F,fontSize:13,fontWeight:700,color:"#1a2332",marginBottom:10}}>
+              Coverage Gaps
+              {gaps.length>0&&<span style={{fontFamily:F,fontSize:12,fontWeight:400,color:"#94a3b8",marginLeft:8}}>{gaps.length} missing or expired</span>}
+            </div>
+            <Card>
+              {gaps.length===0
+                ?<div style={{padding:"24px 20px",textAlign:"center",fontFamily:F,fontSize:13,color:"#64748b"}}>✓ All required documents are on file.</div>
+                :gaps.map(({biz,item},idx)=>{
+                  const isLast=idx===gaps.length-1;
+                  const expired=item.docStatus==="expired";
+                  return (
+                    <div key={item.id} style={{display:"flex",alignItems:"center",gap:14,padding:"12px 18px",borderBottom:isLast?"none":"1px solid #f1f5f9"}}>
+                      <div style={{width:3,height:30,borderRadius:99,flexShrink:0,background:expired?"#f97316":"#ef4444"}}/>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontFamily:F,fontSize:13,fontWeight:600,color:"#1a2332",marginBottom:1}}>{item.title}</div>
+                        <div style={{fontFamily:F,fontSize:11,color:"#94a3b8"}}>{biz.name}</div>
+                      </div>
+                      <span style={{fontFamily:F,fontSize:11,fontWeight:600,background:expired?"#fffbeb":"#fef2f2",color:expired?"#b45309":"#b91c1c",border:`1px solid ${expired?"#fde68a":"#fecaca"}`,borderRadius:999,padding:"2px 8px",flexShrink:0}}>{expired?"Expired":"Missing"}</span>
+                      <button onClick={()=>navUpload({itemId:item.id,bizId:item.biz})} style={{fontFamily:F,fontSize:12,fontWeight:600,color:"#fff",background:"#2563eb",border:"none",borderRadius:7,padding:"5px 12px",cursor:"pointer",flexShrink:0}}>Upload</button>
+                    </div>
+                  );
+                })
+              }
+            </Card>
+          </div>
+        );
+      })()}
 
       <div>
         <div style={{fontFamily:F,fontSize:13,fontWeight:700,color:"#1a2332",marginBottom:10}}>Businesses</div>
@@ -427,7 +468,7 @@ function ComplianceList({bizs, items, setItem, setView, bizFilter}) {
 
 // ── DETAIL ────────────────────────────────────────────────────────────────────
 
-function Detail({bizs, item, setView, backView="dashboard"}) {
+function Detail({bizs, item, setView, backView="dashboard", navUpload}) {
   const [done, setDone] = useState(item.status==="Completed");
   const biz  = bizs.find(b=>b.id===item.biz);
   const days = daysBetween(item.due);
@@ -497,8 +538,8 @@ function Detail({bizs, item, setView, backView="dashboard"}) {
                 <span style={{fontFamily:F,fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:".06em",color:"#94a3b8",width:150,flexShrink:0}}>Status</span>
                 <span style={{fontFamily:F,background:docS.bg,color:docS.tx,borderRadius:999,padding:"3px 10px",fontSize:11,fontWeight:600}}>{docS.label}</span>
                 {item.docStatus==="uploaded"
-                  ? <span style={{fontFamily:F,fontSize:11,color:"#64748b"}}>license_2026.pdf</span>
-                  : <button style={{fontFamily:F,fontSize:12,fontWeight:600,color:"#fff",background:"#2563eb",border:"none",borderRadius:7,padding:"5px 12px",cursor:"pointer"}}>Upload Document</button>
+                  ? <span style={{fontFamily:F,fontSize:11,color:"#64748b"}}>{item.fileName||"license_2026.pdf"}</span>
+                  : <button onClick={()=>navUpload&&navUpload({itemId:item.id,bizId:item.biz})} style={{fontFamily:F,fontSize:12,fontWeight:600,color:"#fff",background:"#2563eb",border:"none",borderRadius:7,padding:"5px 12px",cursor:"pointer"}}>Upload Document</button>
                 }
               </div>
             </Card>
@@ -542,7 +583,7 @@ function Detail({bizs, item, setView, backView="dashboard"}) {
 
 // ── BUSINESSES ────────────────────────────────────────────────────────────────
 
-function Businesses({bizs, items, setView, setBizFilter}) {
+function Businesses({bizs, items, setView, setBizFilter, navBizDetail}) {
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -570,7 +611,7 @@ function Businesses({bizs, items, setView, setBizFilter}) {
           return (
             <div key={biz.id} style={{background:"#fff",border:"1px solid #e8ecf0",borderRadius:14,padding:18,display:"flex",flexDirection:"column",gap:0}} onMouseEnter={e=>e.currentTarget.style.borderColor="#cbd5e1"} onMouseLeave={e=>e.currentTarget.style.borderColor="#e8ecf0"}>
               <div style={{marginBottom:10}}>
-                <div style={{fontFamily:F,fontSize:15,fontWeight:800,color:"#1a2332"}}>{biz.name}</div>
+                <div onClick={()=>navBizDetail&&navBizDetail(biz)} style={{fontFamily:F,fontSize:15,fontWeight:800,color:"#2563eb",cursor:"pointer",textDecoration:"underline",textDecorationColor:"#bfdbfe"}}>{biz.name}</div>
                 <div style={{fontFamily:F,fontSize:11,color:"#94a3b8",marginTop:2}}>{biz.type} · {biz.city}, {biz.state}</div>
               </div>
               <div style={{fontFamily:F,fontSize:11,color:"#94a3b8",marginBottom:14}}>Contact: {biz.contact}</div>
@@ -681,7 +722,7 @@ function Calendar({bizs, items}) {
 
 // ── DOCUMENTS ─────────────────────────────────────────────────────────────────
 
-function Documents({bizs, items}) {
+function Documents({bizs, items, navUpload}) {
   const [filter, setFilter] = useState("all");
   const [biz,    setBiz]    = useState("all");
   const docItems = items.filter(i=>i.reqDoc);
@@ -699,10 +740,13 @@ function Documents({bizs, items}) {
           <div style={{fontFamily:F,fontSize:22,fontWeight:900,color:"#1a2332"}}>Documents</div>
           <div style={{fontFamily:F,fontSize:13,color:"#94a3b8"}}>Required compliance documents across all businesses</div>
         </div>
-        <Select value={biz} onChange={e=>setBiz(e.target.value)}>
-          <option value="all">All Businesses</option>
-          {bizs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
-        </Select>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <Select value={biz} onChange={e=>setBiz(e.target.value)}>
+            <option value="all">All Businesses</option>
+            {bizs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+          </Select>
+          <Btn primary small onClick={()=>navUpload&&navUpload()}>+ Upload Document</Btn>
+        </div>
       </div>
       <div style={{display:"flex",gap:10}}>
         {[
@@ -742,7 +786,7 @@ function Documents({bizs, items}) {
                   <td style={{padding:"10px 14px"}}>
                     {item.docStatus==="uploaded"
                       ?<button style={{fontFamily:F,fontSize:11,fontWeight:600,color:"#2563eb",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:6,padding:"3px 9px",cursor:"pointer"}}>View</button>
-                      :<button style={{fontFamily:F,fontSize:11,fontWeight:600,color:"#fff",background:"#2563eb",border:"none",borderRadius:6,padding:"3px 9px",cursor:"pointer"}}>Upload</button>
+                      :<button onClick={()=>navUpload&&navUpload({itemId:item.id,bizId:item.biz})} style={{fontFamily:F,fontSize:11,fontWeight:600,color:"#fff",background:"#2563eb",border:"none",borderRadius:6,padding:"3px 9px",cursor:"pointer"}}>Upload</button>
                     }
                   </td>
                 </tr>
@@ -1138,6 +1182,252 @@ function AddBusinessWizard({setBizs, setItems, setView}) {
   );
 }
 
+// ── BIZ DETAIL ────────────────────────────────────────────────────────────────
+
+function BizDetail({biz, items, setView, setBizFilter, navUpload}) {
+  const bizItems = items.filter(i=>i.biz===biz.id);
+  const reqDocs  = bizItems.filter(i=>i.reqDoc);
+  const ov   = bizItems.filter(isOverdue).length;
+  const d30  = bizItems.filter(i=>isDueSoon(i,30)).length;
+  const docs = reqDocs.filter(i=>i.docStatus!=="uploaded").length;
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16,maxWidth:760}}>
+      <button onClick={()=>setView("businesses")} style={{fontFamily:F,background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:13,padding:0,display:"flex",alignItems:"center",gap:4}}>← Businesses</button>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+        <div>
+          <div style={{fontFamily:F,fontSize:22,fontWeight:900,color:"#1a2332"}}>{biz.name}</div>
+          <div style={{fontFamily:F,fontSize:13,color:"#94a3b8",marginTop:2}}>{biz.type} · {biz.city}, {biz.state}</div>
+          <div style={{fontFamily:F,fontSize:12,color:"#64748b",marginTop:4}}>Contact: {biz.contact} · {biz.email}</div>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <Btn small onClick={()=>{setBizFilter(biz.id);setView("compliance");}}>View Compliance Items →</Btn>
+          <Btn primary small onClick={()=>navUpload({bizId:biz.id})}>+ Upload Document</Btn>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:12}}>
+        {[
+          {label:"Overdue",      val:ov,   c:ov>0?"#dc2626":"#94a3b8",  bg:ov>0?"#fef2f2":"#f8fafc"},
+          {label:"Due in 30d",   val:d30,  c:d30>0?"#d97706":"#94a3b8", bg:d30>0?"#fffbeb":"#f8fafc"},
+          {label:"Missing Docs", val:docs, c:docs>0?"#ea580c":"#94a3b8",bg:docs>0?"#fff7ed":"#f8fafc"},
+        ].map(s=>(
+          <div key={s.label} style={{flex:1,background:s.bg,border:"1px solid #e8ecf0",borderRadius:12,padding:"14px 18px"}}>
+            <Lbl>{s.label}</Lbl>
+            <div style={{fontFamily:F,fontSize:30,fontWeight:900,color:s.c,lineHeight:1,margin:"6px 0 0"}}>{s.val}</div>
+          </div>
+        ))}
+      </div>
+      <Card>
+        <CardHd right={<Btn primary small onClick={()=>navUpload({bizId:biz.id})}>+ Upload</Btn>}>Required Documents</CardHd>
+        {reqDocs.length===0
+          ?<div style={{padding:"24px",textAlign:"center",fontFamily:F,fontSize:13,color:"#94a3b8"}}>No documents required for this business.</div>
+          :<table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead>
+              <tr style={{background:"#f8fafc",borderBottom:"1px solid #e8ecf0"}}>
+                {["Document","Status","Expiration","Action"].map(h=>(
+                  <th key={h} style={{padding:"8px 14px",textAlign:"left",fontFamily:F,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#64748b"}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {reqDocs.map(item=>{
+                const docS=DS[item.docStatus]??DS["n/a"];const ov=isOverdue(item);
+                return (
+                  <tr key={item.id} style={{borderBottom:"1px solid #f8fafc"}}>
+                    <td style={{padding:"10px 14px"}}>
+                      <div style={{fontFamily:F,fontSize:13,fontWeight:600,color:"#1a2332"}}>{item.title}</div>
+                      {ov&&<div style={{fontFamily:F,fontSize:10,color:"#dc2626",marginTop:1}}>⚠ Overdue</div>}
+                    </td>
+                    <td style={{padding:"10px 14px"}}><span style={{fontFamily:F,background:docS.bg,color:docS.tx,borderRadius:999,padding:"2px 8px",fontSize:11,fontWeight:600}}>{docS.label}</span></td>
+                    <td style={{padding:"10px 14px",fontFamily:F,fontSize:12,color:ov?"#dc2626":"#475569",fontWeight:ov?700:400}}>{fmt(item.due)}</td>
+                    <td style={{padding:"10px 14px"}}>
+                      {item.docStatus==="uploaded"
+                        ?<button style={{fontFamily:F,fontSize:11,fontWeight:600,color:"#2563eb",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:6,padding:"3px 9px",cursor:"pointer"}}>View</button>
+                        :<button onClick={()=>navUpload({itemId:item.id,bizId:biz.id})} style={{fontFamily:F,fontSize:11,fontWeight:600,color:"#fff",background:"#2563eb",border:"none",borderRadius:6,padding:"3px 9px",cursor:"pointer"}}>Upload</button>
+                      }
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        }
+      </Card>
+    </div>
+  );
+}
+
+// ── UPLOAD DOCUMENT WIZARD ────────────────────────────────────────────────────
+
+function UploadDocWizard({bizs, items, setItems, setView, prefill}) {
+  const initBizId  = prefill?.bizId  || bizs[0]?.id || "";
+  const initItemId = prefill?.itemId || "";
+  const [step, setStep]   = useState(1);
+  const [form, setForm]   = useState({bizId:initBizId, docType:"Business License", fileName:"document.pdf", expDate:"", agency:"", itemId:initItemId});
+  const [ext,  setExt]    = useState({});
+  const [saved,setSaved]  = useState(false);
+
+  const bizItems = items.filter(i=>i.biz===form.bizId && i.reqDoc);
+  const selBiz   = bizs.find(b=>b.id===form.bizId);
+  const selItem  = items.find(i=>i.id===form.itemId);
+
+  const setF = (k,v) => setForm(p=>({...p,[k]:v}));
+
+  const onBizChange = v => { setF("bizId",v); setF("itemId",""); };
+  const onItemChange = v => {
+    const it = items.find(i=>i.id===v);
+    setF("itemId",v);
+    if(it) setF("docType", CAT_TO_DOC[it.cat] || form.docType);
+  };
+
+  const goStep2 = () => {
+    const policyNum = `${form.docType.split(" ")[0].slice(0,3).toUpperCase()}-${selBiz?.id?.slice(-2).toUpperCase()||"XX"}2026-${(form.itemId||"gen").slice(-3).toUpperCase()}`;
+    setExt({
+      docType:  {val:form.docType,  conf:94},
+      business: {val:selBiz?.name||"", conf:98},
+      expDate:  {val:form.expDate,  conf:form.expDate?87:0},
+      agency:   {val:form.agency,   conf:form.agency?91:65},
+      policyNum:{val:policyNum,     conf:76},
+    });
+    setStep(2);
+  };
+
+  const saveDoc = () => {
+    if(form.itemId){
+      setItems(prev=>prev.map(i=>i.id===form.itemId
+        ?{...i,docStatus:"uploaded",fileName:ext.policyNum.val?`${form.fileName}`:form.fileName,due:ext.expDate.val||i.due}
+        :i
+      ));
+    }
+    setSaved(true);
+  };
+
+  const ConfBadge = ({conf}) => {
+    if(!conf) return <span style={{fontFamily:F,fontSize:10,color:"#94a3b8"}}>—</span>;
+    const c=conf>=90?"#15803d":conf>=75?"#b45309":"#b91c1c";
+    const bg=conf>=90?"#f0fdf4":conf>=75?"#fffbeb":"#fef2f2";
+    return <span style={{fontFamily:F,fontSize:10,fontWeight:700,color:c,background:bg,border:`1px solid ${conf>=90?"#bbf7d0":conf>=75?"#fde68a":"#fecaca"}`,borderRadius:999,padding:"1px 7px"}}>{conf}%</span>;
+  };
+
+  if(saved){
+    return (
+      <div style={{maxWidth:520,margin:"0 auto",display:"flex",flexDirection:"column",alignItems:"center",gap:16,paddingTop:48,textAlign:"center"}}>
+        <div style={{width:64,height:64,background:"#f0fdf4",border:"2px solid #bbf7d0",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28}}>✓</div>
+        <div style={{fontFamily:F,fontSize:20,fontWeight:800,color:"#1a2332"}}>Document saved</div>
+        {selItem&&<div style={{fontFamily:F,fontSize:13,color:"#64748b"}}><strong>{selItem.title}</strong> is now marked On File.</div>}
+        {!selItem&&<div style={{fontFamily:F,fontSize:13,color:"#64748b"}}>Document uploaded successfully.</div>}
+        <div style={{display:"flex",gap:10,marginTop:8}}>
+          <Btn onClick={()=>{setStep(1);setForm({bizId:initBizId,docType:"Business License",fileName:"document.pdf",expDate:"",agency:"",itemId:""});setSaved(false);}}>Upload Another</Btn>
+          <Btn primary onClick={()=>setView("documents")}>Back to Documents</Btn>
+        </div>
+      </div>
+    );
+  }
+
+  const StepBar = () => (
+    <div style={{display:"flex",alignItems:"center",marginBottom:24}}>
+      {["Upload Document","Review Extraction","Save"].map((label,i)=>(
+        <div key={label} style={{display:"flex",alignItems:"center",flex:i<2?1:"auto"}}>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+            <div style={{width:26,height:26,borderRadius:"50%",background:step>=i+1?"#2563eb":"#e2e8f0",color:step>=i+1?"#fff":"#94a3b8",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:F,fontSize:11,fontWeight:700}}>{step>i+1?"✓":i+1}</div>
+            <div style={{fontFamily:F,fontSize:10,fontWeight:600,color:step>=i+1?"#2563eb":"#94a3b8",whiteSpace:"nowrap"}}>{label}</div>
+          </div>
+          {i<2&&<div style={{flex:1,height:2,background:step>i+1?"#2563eb":"#e2e8f0",margin:"0 8px",marginBottom:16}}/>}
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div style={{maxWidth:580,margin:"0 auto"}}>
+      <div style={{marginBottom:20}}>
+        <button onClick={()=>step===1?setView("documents"):setStep(s=>s-1)} style={{fontFamily:F,background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:13,padding:0,display:"flex",alignItems:"center",gap:4}}>← {step===1?"Documents":"Back"}</button>
+        <div style={{fontFamily:F,fontSize:22,fontWeight:900,color:"#1a2332",marginTop:8}}>Upload Document</div>
+      </div>
+      <StepBar/>
+
+      {step===1&&(
+        <Card>
+          <CardHd>Document Details</CardHd>
+          <div style={{padding:"20px",display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div>
+                <Lbl style={{display:"block",marginBottom:5}}>Business</Lbl>
+                <Select value={form.bizId} onChange={e=>onBizChange(e.target.value)} style={{width:"100%"}}>
+                  {bizs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+                </Select>
+              </div>
+              <div>
+                <Lbl style={{display:"block",marginBottom:5}}>Document Type</Lbl>
+                <Select value={form.docType} onChange={e=>setF("docType",e.target.value)} style={{width:"100%"}}>
+                  {DOC_TYPES.map(t=><option key={t}>{t}</option>)}
+                </Select>
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div>
+                <Lbl style={{display:"block",marginBottom:5}}>File Name</Lbl>
+                <Input value={form.fileName} onChange={e=>setF("fileName",e.target.value)} style={{width:"100%",boxSizing:"border-box"}}/>
+              </div>
+              <div>
+                <Lbl style={{display:"block",marginBottom:5}}>Expiration Date</Lbl>
+                <input type="date" value={form.expDate} onChange={e=>setF("expDate",e.target.value)} style={{fontFamily:F,border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,background:"#fff",width:"100%",boxSizing:"border-box"}}/>
+              </div>
+            </div>
+            <div>
+              <Lbl style={{display:"block",marginBottom:5}}>Issuing Agency</Lbl>
+              <Input value={form.agency} onChange={e=>setF("agency",e.target.value)} placeholder="e.g. DC ABRA, TTB, DC Dept of Health…" style={{width:"100%",boxSizing:"border-box"}}/>
+            </div>
+            <div>
+              <Lbl style={{display:"block",marginBottom:5}}>Associated Compliance Item</Lbl>
+              <Select value={form.itemId} onChange={e=>onItemChange(e.target.value)} style={{width:"100%"}}>
+                <option value="">None / General upload</option>
+                {bizItems.map(i=><option key={i.id} value={i.id}>{i.title}</option>)}
+              </Select>
+            </div>
+            <div style={{paddingTop:8,borderTop:"1px solid #f1f5f9",display:"flex",justifyContent:"flex-end",gap:8,alignItems:"center"}}>
+              <div style={{fontFamily:F,fontSize:11,color:"#94a3b8",flex:1}}>We'll run a quick mock extraction on the next step.</div>
+              <Btn primary onClick={goStep2}>Continue →</Btn>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {step===2&&(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <Card>
+            <div style={{padding:"14px 20px 10px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #f1f5f9"}}>
+              <div style={{fontFamily:F,fontSize:14,fontWeight:700,color:"#1a2332"}}>Document Analysis</div>
+              <span style={{fontFamily:F,fontSize:10,fontWeight:700,color:"#7c3aed",background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:999,padding:"2px 8px"}}>AI-assisted</span>
+            </div>
+            <div style={{padding:"4px 0"}}>
+              {[
+                {label:"Document Type", key:"docType"},
+                {label:"Business",      key:"business"},
+                {label:"Expiration",    key:"expDate"},
+                {label:"Issuing Agency",key:"agency"},
+                {label:"License / Policy #", key:"policyNum"},
+              ].map(({label,key})=>(
+                <div key={key} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 20px",borderBottom:"1px solid #f8fafc"}}>
+                  <div style={{width:150,flexShrink:0,fontFamily:F,fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:".06em",color:"#94a3b8"}}>{label}</div>
+                  <input value={ext[key]?.val||""} onChange={e=>setExt(p=>({...p,[key]:{...p[key],val:e.target.value}}))} style={{flex:1,fontFamily:F,border:"1px solid #e2e8f0",borderRadius:6,padding:"5px 9px",fontSize:13,background:"#fff",outline:"none"}}/>
+                  <ConfBadge conf={ext[key]?.conf}/>
+                </div>
+              ))}
+            </div>
+            <div style={{padding:"12px 20px",background:"#f8fafc",borderTop:"1px solid #f1f5f9"}}>
+              <div style={{fontFamily:F,fontSize:11,color:"#64748b"}}>Review and correct any fields above before saving. All values are editable.</div>
+            </div>
+          </Card>
+          <div style={{display:"flex",justifyContent:"flex-end",gap:10,padding:"0 2px"}}>
+            <Btn onClick={()=>setStep(1)}>← Back</Btn>
+            <button onClick={saveDoc} style={{fontFamily:F,background:"#2563eb",color:"#fff",border:"none",borderRadius:8,padding:"10px 22px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Save to Compliance Item →</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── LANDING ───────────────────────────────────────────────────────────────────
 
 function Landing({setView}) {
@@ -1217,10 +1507,14 @@ export default function BackStOPSApp() {
   const [view,      setView]      = useState("landing");
   const [item,      setItem]      = useState(null);
   const [bizFilter, setBizFilter] = useState("all");
-  const [bizs,      setBizs]      = useState(INIT_BIZS);
-  const [items,     setItems]     = useState(INIT_ITEMS);
+  const [bizs,       setBizs]      = useState(INIT_BIZS);
+  const [items,      setItems]     = useState(INIT_ITEMS);
+  const [docPrefill, setDocPrefill]= useState(null);
+  const [selBiz,     setSelBiz]    = useState(null);
 
-  const nav = v => { setView(v); if(v!=="detail"&&v!=="compliance") setItem(null); };
+  const nav         = v => { setView(v); if(v!=="detail"&&v!=="compliance") setItem(null); };
+  const navUpload   = (prefill=null) => { setDocPrefill(prefill); nav("uploadDoc"); };
+  const navBizDetail= (biz) => { setSelBiz(biz); nav("bizDetail"); };
 
   if(view==="landing") {
     return <div style={{fontFamily:F,minHeight:"100vh",background:"#fff"}}><Landing setView={nav}/></div>;
@@ -1230,15 +1524,17 @@ export default function BackStOPSApp() {
     <div style={{fontFamily:F,display:"flex",height:"100vh",overflow:"hidden",background:"#f1f5f9"}}>
       <Sidebar view={view} setView={nav}/>
       <main style={{flex:1,overflowY:"auto",padding:"28px 32px"}}>
-        {view==="dashboard"   && <Dashboard   bizs={bizs} items={items} setView={nav} setItem={setItem}/>}
-        {view==="businesses"  && <Businesses  bizs={bizs} items={items} setView={nav} setBizFilter={setBizFilter}/>}
+        {view==="dashboard"   && <Dashboard   bizs={bizs} items={items} setView={nav} setItem={setItem} navUpload={navUpload}/>}
+        {view==="businesses"  && <Businesses  bizs={bizs} items={items} setView={nav} setBizFilter={setBizFilter} navBizDetail={navBizDetail}/>}
         {view==="compliance"  && <ComplianceList bizs={bizs} items={items} setItem={setItem} setView={nav} bizFilter={bizFilter}/>}
-        {view==="detail"      && item && <Detail bizs={bizs} item={item} setView={nav} backView="dashboard"/>}
+        {view==="detail"      && item && <Detail bizs={bizs} item={item} setView={nav} backView="dashboard" navUpload={navUpload}/>}
         {view==="calendar"    && <Calendar    bizs={bizs} items={items}/>}
-        {view==="documents"   && <Documents   bizs={bizs} items={items}/>}
+        {view==="documents"   && <Documents   bizs={bizs} items={items} navUpload={navUpload}/>}
         {view==="settings"    && <Settings/>}
         {view==="admin"       && <Admin       bizs={bizs} items={items} setItem={setItem} setView={nav}/>}
         {view==="addBusiness" && <AddBusinessWizard setBizs={setBizs} setItems={setItems} setView={nav}/>}
+        {view==="uploadDoc"   && <UploadDocWizard bizs={bizs} items={items} setItems={setItems} setView={nav} prefill={docPrefill}/>}
+        {view==="bizDetail"   && selBiz && <BizDetail biz={selBiz} items={items} setView={nav} setBizFilter={setBizFilter} navUpload={navUpload}/>}
       </main>
     </div>
   );
